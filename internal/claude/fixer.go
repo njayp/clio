@@ -1,4 +1,4 @@
-package main
+package claude
 
 import (
 	"context"
@@ -6,18 +6,19 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/njayp/clio"
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-// ClaudeFixer generates code fixes using the Anthropic API.
-type ClaudeFixer struct {
+// Fixer generates code fixes using the Anthropic API.
+type Fixer struct {
 	client anthropic.Client
 	model  anthropic.Model
 }
 
-// NewClaudeFixer creates a fixer with the given client and model.
-func NewClaudeFixer(client anthropic.Client, model string) *ClaudeFixer {
-	return &ClaudeFixer{client: client, model: anthropic.Model(model)}
+// NewFixer creates a fixer with the given client and model.
+func NewFixer(client anthropic.Client, model string) *Fixer {
+	return &Fixer{client: client, model: anthropic.Model(model)}
 }
 
 type fixResponse struct {
@@ -28,10 +29,10 @@ type fixResponse struct {
 }
 
 // GenerateFix sends the error context and source files to Claude to generate a fix.
-func (f *ClaudeFixer) GenerateFix(ctx context.Context, event ErrorEvent, class Classification, files map[string]string) (Fix, error) {
+func (f *Fixer) GenerateFix(ctx context.Context, event clio.ErrorEvent, class clio.Classification, files map[string]string) (clio.Fix, error) {
 	var fr fixResponse
-	if err := callClaude(ctx, f.client, f.model, 4096, FixPrompt(event, class, files), &fr); err != nil {
-		return Fix{}, fmt.Errorf("fix: %w", err)
+	if err := callClaude(ctx, f.client, f.model, 4096, fixPrompt(event, class, files), &fr); err != nil {
+		return clio.Fix{}, fmt.Errorf("fix: %w", err)
 	}
 
 	if len(fr.FileChanges) == 0 {
@@ -39,10 +40,10 @@ func (f *ClaudeFixer) GenerateFix(ctx context.Context, event ErrorEvent, class C
 			"pod", event.PodName,
 			"reasoning", fr.Reasoning,
 		)
-		return Fix{}, fmt.Errorf("fix: no file changes proposed (reasoning: %s)", fr.Reasoning)
+		return clio.Fix{}, fmt.Errorf("fix: no file changes proposed (reasoning: %s)", fr.Reasoning)
 	}
 
-	branch := BranchName(Fingerprint(event), class.Summary)
+	branch := clio.BranchName(clio.Fingerprint(event), class.Summary)
 	rawLogs := strings.Join(event.LogLines, "\n")
 
 	slog.Info("generated fix",
@@ -51,7 +52,7 @@ func (f *ClaudeFixer) GenerateFix(ctx context.Context, event ErrorEvent, class C
 		"files_changed", len(fr.FileChanges),
 	)
 
-	return Fix{
+	return clio.Fix{
 		Branch:      branch,
 		Title:       fr.Title,
 		Body:        fr.Body,

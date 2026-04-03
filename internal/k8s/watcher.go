@@ -1,4 +1,4 @@
-package main
+package k8s
 
 import (
 	"bufio"
@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/njayp/clio"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -17,32 +18,32 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// K8sWatcher watches pods in a Helm release and streams log lines as ErrorEvents.
-type K8sWatcher struct {
+// Watcher watches pods in a Helm release and streams log lines as ErrorEvents.
+type Watcher struct {
 	client    kubernetes.Interface
 	namespace string
 	repo      string
 	release   string
 	target    string // optional: narrow to app.kubernetes.io/name
 	tailLines int64
-	out       chan ErrorEvent
+	out       chan clio.ErrorEvent
 }
 
-// NewK8sWatcher creates a watcher for pods matching the given Helm release.
-func NewK8sWatcher(client kubernetes.Interface, cfg Config) *K8sWatcher {
-	return &K8sWatcher{
+// NewWatcher creates a watcher for pods matching the given Helm release.
+func NewWatcher(client kubernetes.Interface, cfg clio.Config) *Watcher {
+	return &Watcher{
 		client:    client,
 		namespace: cfg.Namespace,
 		repo:      cfg.Repo,
 		release:   cfg.Release,
 		target:    cfg.Target,
 		tailLines: cfg.TailLines,
-		out:       make(chan ErrorEvent, 100),
+		out:       make(chan clio.ErrorEvent, 100),
 	}
 }
 
 // Watch starts watching pods and streaming their logs. Returns a channel of single-line ErrorEvents.
-func (w *K8sWatcher) Watch(ctx context.Context) (<-chan ErrorEvent, error) {
+func (w *Watcher) Watch(ctx context.Context) (<-chan clio.ErrorEvent, error) {
 	labelSelector := labelSelectorForRelease(w.release, w.target).String()
 
 	factory := informers.NewSharedInformerFactoryWithOptions(
@@ -90,7 +91,7 @@ func (w *K8sWatcher) Watch(ctx context.Context) (<-chan ErrorEvent, error) {
 	return w.out, nil
 }
 
-func (w *K8sWatcher) startTailing(ctx context.Context, pod *corev1.Pod, tracked map[string]context.CancelFunc) {
+func (w *Watcher) startTailing(ctx context.Context, pod *corev1.Pod, tracked map[string]context.CancelFunc) {
 	key := pod.Namespace + "/" + pod.Name
 	if _, ok := tracked[key]; ok {
 		return
@@ -104,7 +105,7 @@ func (w *K8sWatcher) startTailing(ctx context.Context, pod *corev1.Pod, tracked 
 	}
 }
 
-func (w *K8sWatcher) tailLogs(ctx context.Context, podName, namespace, container string) {
+func (w *Watcher) tailLogs(ctx context.Context, podName, namespace, container string) {
 	sinceTime := metav1.NewTime(time.Now())
 	tailLines := w.tailLines
 
@@ -138,7 +139,7 @@ func (w *K8sWatcher) tailLogs(ctx context.Context, podName, namespace, container
 			if !IsErrorLine(line) {
 				continue
 			}
-			w.out <- ErrorEvent{
+			w.out <- clio.ErrorEvent{
 				PodName:   podName,
 				Namespace: namespace,
 				Container: container,
@@ -159,8 +160,8 @@ func (w *K8sWatcher) tailLogs(ctx context.Context, podName, namespace, container
 
 // GatherContext populates the K8sContext for an error event by reading
 // pod events, owning deployment status, configmaps, and deployment history.
-func (w *K8sWatcher) GatherContext(ctx context.Context, event *ErrorEvent) error {
-	kctx := &K8sContext{}
+func (w *Watcher) GatherContext(ctx context.Context, event *clio.ErrorEvent) error {
+	kctx := &clio.K8sContext{}
 
 	// Get pod events
 	events, err := w.client.CoreV1().Events(event.Namespace).List(ctx, metav1.ListOptions{
@@ -222,7 +223,7 @@ func (w *K8sWatcher) GatherContext(ctx context.Context, event *ErrorEvent) error
 
 // gatherDeployHistory reads ReplicaSets owned by the deployment to find the
 // previous revision's image tag and detect rollbacks.
-func (w *K8sWatcher) gatherDeployHistory(ctx context.Context, namespace, deployName, currentRSName string, kctx *K8sContext) {
+func (w *Watcher) gatherDeployHistory(ctx context.Context, namespace, deployName, currentRSName string, kctx *clio.K8sContext) {
 	// List ReplicaSets in namespace (filtered client-side by owner reference below)
 	rsList, err := w.client.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {

@@ -1,8 +1,10 @@
-package main
+package pipeline
 
 import (
 	"sync"
 	"time"
+
+	"github.com/njayp/clio"
 )
 
 // Batcher groups consecutive error lines from the same pod/container into
@@ -10,17 +12,17 @@ import (
 // source (pod+container) changes.
 type Batcher struct {
 	window time.Duration
-	out    chan ErrorEvent
+	out    chan clio.ErrorEvent
 	mu     sync.Mutex
 	timers map[string]*batchEntry
 }
 
 type batchEntry struct {
-	event ErrorEvent
+	event clio.ErrorEvent
 	timer *time.Timer
 }
 
-func batchKey(e ErrorEvent) string {
+func batchKey(e clio.ErrorEvent) string {
 	return e.Namespace + "/" + e.PodName + "/" + e.Container
 }
 
@@ -28,14 +30,14 @@ func batchKey(e ErrorEvent) string {
 func NewBatcher(window time.Duration) *Batcher {
 	return &Batcher{
 		window: window,
-		out:    make(chan ErrorEvent, 100),
+		out:    make(chan clio.ErrorEvent, 100),
 		timers: make(map[string]*batchEntry),
 	}
 }
 
 // Add appends a single-line ErrorEvent to the current batch for its pod/container.
 // The batched event is flushed after the window expires with no new lines.
-func (b *Batcher) Add(e ErrorEvent) {
+func (b *Batcher) Add(e clio.ErrorEvent) {
 	key := batchKey(e)
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -59,7 +61,7 @@ func (b *Batcher) Add(e ErrorEvent) {
 }
 
 // Events returns the channel of batched error events.
-func (b *Batcher) Events() <-chan ErrorEvent {
+func (b *Batcher) Events() <-chan clio.ErrorEvent {
 	return b.out
 }
 

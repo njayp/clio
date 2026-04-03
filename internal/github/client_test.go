@@ -1,4 +1,4 @@
-package main
+package github
 
 import (
 	"context"
@@ -7,16 +7,17 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/google/go-github/v72/github"
+	"github.com/njayp/clio"
+	gh "github.com/google/go-github/v72/github"
 )
 
-func newTestGitHubClient(t *testing.T, mux *http.ServeMux) *ghClient {
+func newTestGitHubClient(t *testing.T, mux *http.ServeMux) *Client {
 	t.Helper()
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	client := github.NewClient(nil).WithAuthToken("test-token")
+	client := gh.NewClient(nil).WithAuthToken("test-token")
 	client.BaseURL, _ = client.BaseURL.Parse(server.URL + "/")
-	return &ghClient{client: client}
+	return &Client{client: client}
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -41,8 +42,8 @@ func TestGitHubClient_FetchFiles(t *testing.T) {
 		})
 	})
 
-	gh := newTestGitHubClient(t, mux)
-	files, err := gh.FetchFiles(context.Background(), "owner/repo", []string{"pkg/handler.go"})
+	g := newTestGitHubClient(t, mux)
+	files, err := g.FetchFiles(context.Background(), "owner/repo", []string{"pkg/handler.go"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,8 +65,8 @@ func TestGitHubClient_FetchFiles_NotFound(t *testing.T) {
 		writeJSON(w, map[string]any{"message": "Not Found"})
 	})
 
-	gh := newTestGitHubClient(t, mux)
-	files, err := gh.FetchFiles(context.Background(), "owner/repo", []string{"missing.go"})
+	g := newTestGitHubClient(t, mux)
+	files, err := g.FetchFiles(context.Background(), "owner/repo", []string{"missing.go"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,15 +115,15 @@ func TestGitHubClient_CreatePR(t *testing.T) {
 		writeJSON(w, []any{})
 	})
 
-	gh := newTestGitHubClient(t, mux)
-	fix := Fix{
+	g := newTestGitHubClient(t, mux)
+	fix := clio.Fix{
 		Branch:      "clio/fix-test",
 		Title:       "Fix test bug",
 		Body:        "Fixes a test bug",
 		FileChanges: map[string]string{"main.go": "package main"},
 	}
 
-	url, err := gh.CreatePR(context.Background(), "owner/repo", fix)
+	url, err := g.CreatePR(context.Background(), "owner/repo", fix)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,8 +142,8 @@ func TestGitHubClient_ListOpenClioPRs(t *testing.T) {
 		})
 	})
 
-	gh := newTestGitHubClient(t, mux)
-	branches, err := gh.ListOpenClioPRs(context.Background(), "owner/repo")
+	g := newTestGitHubClient(t, mux)
+	branches, err := g.ListOpenClioPRs(context.Background(), "owner/repo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,8 +158,8 @@ func TestGitHubClient_CommentOnPR(t *testing.T) {
 		writeJSON(w, map[string]any{"id": 1, "body": "test comment"})
 	})
 
-	gh := newTestGitHubClient(t, mux)
-	err := gh.CommentOnPR(context.Background(), "owner/repo", "https://github.com/owner/repo/pull/42", "test comment")
+	g := newTestGitHubClient(t, mux)
+	err := g.CommentOnPR(context.Background(), "owner/repo", "https://github.com/owner/repo/pull/42", "test comment")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

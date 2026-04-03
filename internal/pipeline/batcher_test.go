@@ -1,26 +1,28 @@
-package main
+package pipeline
 
 import (
 	"testing"
 	"time"
+
+	"github.com/njayp/clio"
 )
 
 func TestBatcher_GroupsConsecutiveLines(t *testing.T) {
 	b := NewBatcher(50 * time.Millisecond)
 
-	b.Add(ErrorEvent{
+	b.Add(clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
 		LogLines:  []string{"panic: nil pointer dereference"},
 	})
-	b.Add(ErrorEvent{
+	b.Add(clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
 		LogLines:  []string{"goroutine 1 [running]:"},
 	})
-	b.Add(ErrorEvent{
+	b.Add(clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
@@ -40,13 +42,13 @@ func TestBatcher_GroupsConsecutiveLines(t *testing.T) {
 func TestBatcher_SeparatesPodContainers(t *testing.T) {
 	b := NewBatcher(50 * time.Millisecond)
 
-	b.Add(ErrorEvent{
+	b.Add(clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
 		LogLines:  []string{"ERROR in web"},
 	})
-	b.Add(ErrorEvent{
+	b.Add(clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "worker",
@@ -73,7 +75,7 @@ func TestBatcher_SeparatesPodContainers(t *testing.T) {
 func TestBatcher_FlushEmitsPending(t *testing.T) {
 	b := NewBatcher(time.Hour) // very long window
 
-	b.Add(ErrorEvent{
+	b.Add(clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
@@ -95,7 +97,7 @@ func TestBatcher_FlushEmitsPending(t *testing.T) {
 func TestBatcher_SingleLinePassesThrough(t *testing.T) {
 	b := NewBatcher(50 * time.Millisecond)
 
-	b.Add(ErrorEvent{
+	b.Add(clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",

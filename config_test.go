@@ -1,4 +1,4 @@
-package main
+package clio
 
 import (
 	"os"

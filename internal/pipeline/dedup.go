@@ -1,10 +1,6 @@
-package main
+package pipeline
 
 import (
-	"crypto/sha256"
-	"fmt"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -32,21 +28,6 @@ func NewDedup(cooldown time.Duration) *Dedup {
 		}
 	}()
 	return d
-}
-
-// Fingerprint generates a stable hash for an error event.
-// It normalizes by sorting log lines and hashing the container + content.
-func Fingerprint(e ErrorEvent) string {
-	lines := make([]string, len(e.LogLines))
-	copy(lines, e.LogLines)
-	sort.Strings(lines)
-
-	h := sha256.New()
-	fmt.Fprintf(h, "%s/%s\n", e.Repo, e.Container)
-	for _, l := range lines {
-		fmt.Fprintln(h, l)
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))[:16]
 }
 
 // IsDuplicate returns true if this fingerprint was seen within the cooldown window.
@@ -77,22 +58,4 @@ func (d *Dedup) Cleanup() {
 			delete(d.seen, fp)
 		}
 	}
-}
-
-// BranchName generates a clio/ prefixed branch name for an error event.
-func BranchName(fp string, summary string) string {
-	slug := strings.ToLower(summary)
-	slug = strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			return r
-		}
-		return '-'
-	}, slug)
-	// Trim leading/trailing dashes and collapse multiples
-	parts := strings.FieldsFunc(slug, func(r rune) bool { return r == '-' })
-	slug = strings.Join(parts, "-")
-	if len(slug) > 40 {
-		slug = slug[:40]
-	}
-	return fmt.Sprintf("%s%s-%s", branchPrefix, slug, fp[:8])
 }

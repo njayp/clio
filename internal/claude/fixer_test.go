@@ -1,11 +1,13 @@
-package main
+package claude
 
 import (
 	"context"
 	"testing"
+
+	"github.com/njayp/clio"
 )
 
-func TestClaudeFixer_GeneratesFix(t *testing.T) {
+func TestFixer_GeneratesFix(t *testing.T) {
 	respJSON := `{
 		"title": "Fix nil pointer in auth handler",
 		"body": "Add nil check before accessing user field",
@@ -16,16 +18,16 @@ func TestClaudeFixer_GeneratesFix(t *testing.T) {
 	}`
 
 	client := newTestAnthropicClient(t, anthropicResponse(t, respJSON))
-	fixer := NewClaudeFixer(client, "claude-sonnet-4-20250514")
+	fixer := NewFixer(client, "claude-sonnet-4-20250514")
 
-	event := ErrorEvent{
+	event := clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
 		Repo:      "owner/repo",
 		LogLines:  []string{"panic: nil pointer", "\t/app/pkg/auth/handler.go:42"},
 	}
-	class := Classification{
+	class := clio.Classification{
 		IsCodeBug:     true,
 		Summary:       "Nil pointer in auth handler",
 		RelevantFiles: []string{"pkg/auth/handler.go"},
@@ -52,7 +54,7 @@ func TestClaudeFixer_GeneratesFix(t *testing.T) {
 	}
 }
 
-func TestClaudeFixer_NoFileChanges(t *testing.T) {
+func TestFixer_NoFileChanges(t *testing.T) {
 	respJSON := `{
 		"title": "Cannot fix",
 		"body": "",
@@ -61,10 +63,10 @@ func TestClaudeFixer_NoFileChanges(t *testing.T) {
 	}`
 
 	client := newTestAnthropicClient(t, anthropicResponse(t, respJSON))
-	fixer := NewClaudeFixer(client, "claude-sonnet-4-20250514")
+	fixer := NewFixer(client, "claude-sonnet-4-20250514")
 
-	event := ErrorEvent{PodName: "app-1", Container: "web", Repo: "owner/repo", LogLines: []string{"ERROR"}}
-	class := Classification{IsCodeBug: true, Summary: "Some error"}
+	event := clio.ErrorEvent{PodName: "app-1", Container: "web", Repo: "owner/repo", LogLines: []string{"ERROR"}}
+	class := clio.Classification{IsCodeBug: true, Summary: "Some error"}
 
 	_, err := fixer.GenerateFix(context.Background(), event, class, nil)
 	if err == nil {

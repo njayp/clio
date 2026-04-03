@@ -7,6 +7,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/njayp/clio"
+	"github.com/njayp/clio/internal/claude"
+	ghclient "github.com/njayp/clio/internal/github"
+	"github.com/njayp/clio/internal/k8s"
+	"github.com/njayp/clio/internal/pipeline"
+	"github.com/njayp/clio/internal/server"
+
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"k8s.io/client-go/kubernetes"
@@ -16,7 +23,7 @@ import (
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
-	cfg, err := LoadConfig()
+	cfg, err := clio.LoadConfig()
 	if err != nil {
 		slog.Error("config error", "error", err)
 		os.Exit(1)
@@ -46,15 +53,15 @@ func main() {
 	)
 
 	// Wire dependencies
-	watcher := NewK8sWatcher(k8sClient, cfg)
-	classifier := NewClaudeClassifier(anthropicClient, cfg.Model)
-	fixer := NewClaudeFixer(anthropicClient, cfg.Model)
-	gh := NewGitHubClient(cfg.GitHubToken)
+	watcher := k8s.NewWatcher(k8sClient, cfg)
+	classifier := claude.NewClassifier(anthropicClient, cfg.Model)
+	fixer := claude.NewFixer(anthropicClient, cfg.Model)
+	gh := ghclient.NewClient(cfg.GitHubToken)
 
-	pipeline := NewPipeline(watcher, classifier, fixer, gh, cfg)
+	p := pipeline.NewPipeline(watcher, classifier, fixer, gh, cfg)
 
 	// HTTP server
-	srv := NewServer(cfg.Port)
+	srv := server.NewServer(cfg.Port)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
@@ -71,7 +78,7 @@ func main() {
 
 	srv.SetHealthy(true)
 
-	if err := pipeline.Run(ctx); err != nil {
+	if err := p.Run(ctx); err != nil {
 		slog.Error("pipeline error", "error", err)
 		os.Exit(1)
 	}

@@ -1,4 +1,4 @@
-package main
+package pipeline
 
 import (
 	"context"
@@ -6,20 +6,22 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/njayp/clio"
 )
 
 // Mock implementations for testing
 
 type mockWatcher struct {
-	events chan ErrorEvent
-	k8sCtx *K8sContext
+	events chan clio.ErrorEvent
+	k8sCtx *clio.K8sContext
 }
 
-func (m *mockWatcher) Watch(ctx context.Context) (<-chan ErrorEvent, error) {
+func (m *mockWatcher) Watch(ctx context.Context) (<-chan clio.ErrorEvent, error) {
 	return m.events, nil
 }
 
-func (m *mockWatcher) GatherContext(_ context.Context, event *ErrorEvent) error {
+func (m *mockWatcher) GatherContext(_ context.Context, event *clio.ErrorEvent) error {
 	if m.k8sCtx != nil {
 		event.K8sContext = m.k8sCtx
 	}
@@ -27,36 +29,36 @@ func (m *mockWatcher) GatherContext(_ context.Context, event *ErrorEvent) error 
 }
 
 type mockClassifier struct {
-	result Classification
+	result clio.Classification
 	err    error
 }
 
-func (m *mockClassifier) Classify(_ context.Context, _ ErrorEvent) (Classification, error) {
+func (m *mockClassifier) Classify(_ context.Context, _ clio.ErrorEvent) (clio.Classification, error) {
 	return m.result, m.err
 }
 
 type mockFixer struct {
-	result Fix
+	result clio.Fix
 	err    error
 }
 
-func (m *mockFixer) GenerateFix(_ context.Context, event ErrorEvent, class Classification, _ map[string]string) (Fix, error) {
+func (m *mockFixer) GenerateFix(_ context.Context, event clio.ErrorEvent, class clio.Classification, _ map[string]string) (clio.Fix, error) {
 	if m.err != nil {
-		return Fix{}, m.err
+		return clio.Fix{}, m.err
 	}
 	fix := m.result
 	if fix.Branch == "" {
-		fix.Branch = BranchName(Fingerprint(event), class.Summary)
+		fix.Branch = clio.BranchName(clio.Fingerprint(event), class.Summary)
 	}
 	return fix, nil
 }
 
 type mockGitHub struct {
-	mu          sync.Mutex
-	prsCreated  []Fix
-	comments    []string
+	mu           sync.Mutex
+	prsCreated   []clio.Fix
+	comments     []string
 	openBranches []string
-	files       map[string]string
+	files        map[string]string
 }
 
 func (m *mockGitHub) FetchFiles(_ context.Context, _ string, _ []string) (map[string]string, error) {
@@ -66,7 +68,7 @@ func (m *mockGitHub) FetchFiles(_ context.Context, _ string, _ []string) (map[st
 	return map[string]string{"main.go": "package main"}, nil
 }
 
-func (m *mockGitHub) CreatePR(_ context.Context, _ string, fix Fix) (string, error) {
+func (m *mockGitHub) CreatePR(_ context.Context, _ string, fix clio.Fix) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.prsCreated = append(m.prsCreated, fix)
@@ -84,19 +86,19 @@ func (m *mockGitHub) ListOpenClioPRs(_ context.Context, _ string) ([]string, err
 	return m.openBranches, nil
 }
 
-func sendEvent(ch chan ErrorEvent, event ErrorEvent) {
+func sendEvent(ch chan clio.ErrorEvent, event clio.ErrorEvent) {
 	ch <- event
 }
 
 func TestPipeline_EndToEnd(t *testing.T) {
-	watcher := &mockWatcher{events: make(chan ErrorEvent, 10)}
-	classifier := &mockClassifier{result: Classification{
+	watcher := &mockWatcher{events: make(chan clio.ErrorEvent, 10)}
+	classifier := &mockClassifier{result: clio.Classification{
 		IsCodeBug:     true,
 		Summary:       "nil pointer in handler",
 		Confidence:    0.9,
 		RelevantFiles: []string{"main.go"},
 	}}
-	fixer := &mockFixer{result: Fix{
+	fixer := &mockFixer{result: clio.Fix{
 		Title:       "Fix nil pointer",
 		Body:        "Adds nil check",
 		FileChanges: map[string]string{"main.go": "package main\n// fixed"},
@@ -104,7 +106,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}}
 	gh := &mockGitHub{}
 
-	cfg := Config{
+	cfg := clio.Config{
 		Repo:           "owner/repo",
 		Cooldown:       time.Hour,
 		BatchWindow:    10 * time.Millisecond,
@@ -117,7 +119,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 
 	go p.Run(ctx)
 
-	sendEvent(watcher.events, ErrorEvent{
+	sendEvent(watcher.events, clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
@@ -147,20 +149,20 @@ func TestPipeline_EndToEnd(t *testing.T) {
 }
 
 func TestPipeline_SkipsExistingPR(t *testing.T) {
-	event := ErrorEvent{
+	event := clio.ErrorEvent{
 		PodName:   "app-1",
 		Container: "web",
 		Repo:      "owner/repo",
 		LogLines:  []string{"ERROR something"},
 	}
-	fp := Fingerprint(event)[:8]
+	fp := clio.Fingerprint(event)[:8]
 
-	watcher := &mockWatcher{events: make(chan ErrorEvent, 10)}
-	classifier := &mockClassifier{result: Classification{IsCodeBug: true, Summary: "bug"}}
-	fixer := &mockFixer{result: Fix{Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"}}}
+	watcher := &mockWatcher{events: make(chan clio.ErrorEvent, 10)}
+	classifier := &mockClassifier{result: clio.Classification{IsCodeBug: true, Summary: "bug"}}
+	fixer := &mockFixer{result: clio.Fix{Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"}}}
 	gh := &mockGitHub{openBranches: []string{"clio/fix-" + fp}}
 
-	cfg := Config{
+	cfg := clio.Config{
 		Repo:           "owner/repo",
 		Cooldown:       time.Hour,
 		BatchWindow:    10 * time.Millisecond,
@@ -184,16 +186,16 @@ func TestPipeline_SkipsExistingPR(t *testing.T) {
 }
 
 func TestPipeline_RateLimiter(t *testing.T) {
-	watcher := &mockWatcher{events: make(chan ErrorEvent, 10)}
-	classifier := &mockClassifier{result: Classification{
+	watcher := &mockWatcher{events: make(chan clio.ErrorEvent, 10)}
+	classifier := &mockClassifier{result: clio.Classification{
 		IsCodeBug: true, Summary: "bug", RelevantFiles: []string{"a.go"},
 	}}
-	fixer := &mockFixer{result: Fix{
+	fixer := &mockFixer{result: clio.Fix{
 		Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"},
 	}}
 	gh := &mockGitHub{}
 
-	cfg := Config{
+	cfg := clio.Config{
 		Repo:           "owner/repo",
 		Cooldown:       10 * time.Millisecond, // short cooldown so dedup doesn't interfere
 		BatchWindow:    10 * time.Millisecond,
@@ -208,7 +210,7 @@ func TestPipeline_RateLimiter(t *testing.T) {
 	// Send two different events
 	for i := 0; i < 2; i++ {
 		time.Sleep(20 * time.Millisecond) // exceed cooldown
-		sendEvent(watcher.events, ErrorEvent{
+		sendEvent(watcher.events, clio.ErrorEvent{
 			PodName:   "app-1",
 			Container: "web",
 			Repo:      "owner/repo",
@@ -228,16 +230,16 @@ func TestPipeline_RateLimiter(t *testing.T) {
 }
 
 func TestPipeline_DryRunSkipsPR(t *testing.T) {
-	watcher := &mockWatcher{events: make(chan ErrorEvent, 10)}
-	classifier := &mockClassifier{result: Classification{
+	watcher := &mockWatcher{events: make(chan clio.ErrorEvent, 10)}
+	classifier := &mockClassifier{result: clio.Classification{
 		IsCodeBug: true, Summary: "bug", RelevantFiles: []string{"a.go"},
 	}}
-	fixer := &mockFixer{result: Fix{
+	fixer := &mockFixer{result: clio.Fix{
 		Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"},
 	}}
 	gh := &mockGitHub{}
 
-	cfg := Config{
+	cfg := clio.Config{
 		Repo:           "owner/repo",
 		Cooldown:       time.Hour,
 		BatchWindow:    10 * time.Millisecond,
@@ -250,7 +252,7 @@ func TestPipeline_DryRunSkipsPR(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
 
-	sendEvent(watcher.events, ErrorEvent{
+	sendEvent(watcher.events, clio.ErrorEvent{
 		PodName:   "app-1",
 		Container: "web",
 		Repo:      "owner/repo",
@@ -270,14 +272,14 @@ func TestPipeline_DryRunSkipsPR(t *testing.T) {
 
 func TestPipeline_SkipsRolledBack(t *testing.T) {
 	watcher := &mockWatcher{
-		events: make(chan ErrorEvent, 10),
-		k8sCtx: &K8sContext{RolledBack: true, DeployName: "myapp"},
+		events: make(chan clio.ErrorEvent, 10),
+		k8sCtx: &clio.K8sContext{RolledBack: true, DeployName: "myapp"},
 	}
-	classifier := &mockClassifier{result: Classification{IsCodeBug: true, Summary: "bug"}}
-	fixer := &mockFixer{result: Fix{Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"}}}
+	classifier := &mockClassifier{result: clio.Classification{IsCodeBug: true, Summary: "bug"}}
+	fixer := &mockFixer{result: clio.Fix{Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"}}}
 	gh := &mockGitHub{}
 
-	cfg := Config{
+	cfg := clio.Config{
 		Repo:           "owner/repo",
 		Cooldown:       time.Hour,
 		BatchWindow:    10 * time.Millisecond,
@@ -289,7 +291,7 @@ func TestPipeline_SkipsRolledBack(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
 
-	sendEvent(watcher.events, ErrorEvent{
+	sendEvent(watcher.events, clio.ErrorEvent{
 		PodName:   "app-1",
 		Container: "web",
 		Repo:      "owner/repo",

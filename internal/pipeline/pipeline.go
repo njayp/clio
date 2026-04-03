@@ -1,4 +1,4 @@
-package main
+package pipeline
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/njayp/clio"
 )
 
 // Prometheus label constants
@@ -21,6 +23,30 @@ const (
 	classOperational = "operational"
 )
 
+// Classifier classifies error events using Claude.
+type Classifier interface {
+	Classify(ctx context.Context, event clio.ErrorEvent) (clio.Classification, error)
+}
+
+// Fixer generates code fixes using Claude.
+type Fixer interface {
+	GenerateFix(ctx context.Context, event clio.ErrorEvent, class clio.Classification, files map[string]string) (clio.Fix, error)
+}
+
+// GitHubClient interacts with the GitHub API for file fetching and PR management.
+type GitHubClient interface {
+	FetchFiles(ctx context.Context, repo string, paths []string) (map[string]string, error)
+	CreatePR(ctx context.Context, repo string, fix clio.Fix) (prURL string, err error)
+	CommentOnPR(ctx context.Context, repo string, prURL string, body string) error
+	ListOpenClioPRs(ctx context.Context, repo string) ([]string, error) // returns open PR branch names with clio/ prefix
+}
+
+// PodWatcher discovers pods and streams their logs.
+type PodWatcher interface {
+	Watch(ctx context.Context) (<-chan clio.ErrorEvent, error)
+	GatherContext(ctx context.Context, event *clio.ErrorEvent) error
+}
+
 // Pipeline orchestrates the full error-to-PR flow.
 type Pipeline struct {
 	watcher    PodWatcher
@@ -29,15 +55,15 @@ type Pipeline struct {
 	gh         GitHubClient
 	dedup      *Dedup
 	batcher    *Batcher
-	cfg        Config
+	cfg        clio.Config
 
 	// Rate limiting
-	mu         sync.Mutex
-	prTimes    []time.Time
+	mu      sync.Mutex
+	prTimes []time.Time
 }
 
 // NewPipeline creates a pipeline with all dependencies wired.
-func NewPipeline(watcher PodWatcher, classifier Classifier, fixer Fixer, gh GitHubClient, cfg Config) *Pipeline {
+func NewPipeline(watcher PodWatcher, classifier Classifier, fixer Fixer, gh GitHubClient, cfg clio.Config) *Pipeline {
 	return &Pipeline{
 		watcher:    watcher,
 		classifier: classifier,
@@ -86,7 +112,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 				return nil
 			}
 			sem <- struct{}{}
-			go func(ev ErrorEvent) {
+			go func(ev clio.ErrorEvent) {
 				defer func() { <-sem }()
 				p.processEvent(ctx, ev)
 			}(event)
@@ -94,8 +120,8 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	}
 }
 
-func (p *Pipeline) processEvent(ctx context.Context, event ErrorEvent) {
-	fp := Fingerprint(event)
+func (p *Pipeline) processEvent(ctx context.Context, event clio.ErrorEvent) {
+	fp := clio.Fingerprint(event)
 
 	// Dedup check
 	if p.dedup.IsDuplicate(fp) {
@@ -221,7 +247,7 @@ func (p *Pipeline) allowPR() bool {
 	return true
 }
 
-func formatPRComment(event ErrorEvent, class Classification, fix Fix) string {
+func formatPRComment(event clio.ErrorEvent, class clio.Classification, fix clio.Fix) string {
 	var sb strings.Builder
 	sb.WriteString("## Clio Auto-Fix Context\n\n")
 

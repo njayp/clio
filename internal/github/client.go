@@ -1,4 +1,4 @@
-package main
+package github
 
 import (
 	"context"
@@ -6,20 +6,19 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/google/go-github/v72/github"
+	"github.com/njayp/clio"
+	gh "github.com/google/go-github/v72/github"
 )
 
-const branchPrefix = "clio/"
-
-// ghClient implements GitHubClient using the go-github SDK.
-type ghClient struct {
-	client *github.Client
+// Client implements the pipeline.GitHubClient interface using the go-github SDK.
+type Client struct {
+	client *gh.Client
 }
 
-// NewGitHubClient creates a GitHubClient with the given token.
-func NewGitHubClient(token string) *ghClient {
-	client := github.NewClient(nil).WithAuthToken(token)
-	return &ghClient{client: client}
+// NewClient creates a Client with the given token.
+func NewClient(token string) *Client {
+	client := gh.NewClient(nil).WithAuthToken(token)
+	return &Client{client: client}
 }
 
 func splitRepo(repo string) (owner, name string) {
@@ -28,7 +27,7 @@ func splitRepo(repo string) (owner, name string) {
 }
 
 // defaultBranch resolves the repo's default branch via the API.
-func (g *ghClient) defaultBranch(ctx context.Context, owner, name string) (string, error) {
+func (g *Client) defaultBranch(ctx context.Context, owner, name string) (string, error) {
 	repo, _, err := g.client.Repositories.Get(ctx, owner, name)
 	if err != nil {
 		return "", fmt.Errorf("get repo: %w", err)
@@ -37,7 +36,7 @@ func (g *ghClient) defaultBranch(ctx context.Context, owner, name string) (strin
 }
 
 // FetchFiles retrieves file contents from GitHub via the Contents API.
-func (g *ghClient) FetchFiles(ctx context.Context, repo string, paths []string) (map[string]string, error) {
+func (g *Client) FetchFiles(ctx context.Context, repo string, paths []string) (map[string]string, error) {
 	owner, name := splitRepo(repo)
 	defBranch, err := g.defaultBranch(ctx, owner, name)
 	if err != nil {
@@ -46,7 +45,7 @@ func (g *ghClient) FetchFiles(ctx context.Context, repo string, paths []string) 
 
 	files := make(map[string]string, len(paths))
 	for _, path := range paths {
-		content, _, _, err := g.client.Repositories.GetContents(ctx, owner, name, path, &github.RepositoryContentGetOptions{Ref: defBranch})
+		content, _, _, err := g.client.Repositories.GetContents(ctx, owner, name, path, &gh.RepositoryContentGetOptions{Ref: defBranch})
 		if err != nil {
 			slog.Warn("failed to fetch file", "path", path, "error", err)
 			continue
@@ -65,7 +64,7 @@ func (g *ghClient) FetchFiles(ctx context.Context, repo string, paths []string) 
 }
 
 // CreatePR creates a branch with the fix changes and opens a pull request.
-func (g *ghClient) CreatePR(ctx context.Context, repo string, fix Fix) (string, error) {
+func (g *Client) CreatePR(ctx context.Context, repo string, fix clio.Fix) (string, error) {
 	owner, name := splitRepo(repo)
 	defBranch, err := g.defaultBranch(ctx, owner, name)
 	if err != nil {
@@ -87,13 +86,13 @@ func (g *ghClient) CreatePR(ctx context.Context, repo string, fix Fix) (string, 
 	baseTreeSHA := baseCommit.Tree.GetSHA()
 
 	// Create tree entries for changed files
-	var entries []*github.TreeEntry
+	var entries []*gh.TreeEntry
 	for path, content := range fix.FileChanges {
-		entries = append(entries, &github.TreeEntry{
-			Path:    github.Ptr(path),
-			Mode:    github.Ptr("100644"),
-			Type:    github.Ptr("blob"),
-			Content: github.Ptr(content),
+		entries = append(entries, &gh.TreeEntry{
+			Path:    gh.Ptr(path),
+			Mode:    gh.Ptr("100644"),
+			Type:    gh.Ptr("blob"),
+			Content: gh.Ptr(content),
 		})
 	}
 
@@ -103,30 +102,30 @@ func (g *ghClient) CreatePR(ctx context.Context, repo string, fix Fix) (string, 
 	}
 
 	// Create commit
-	commit, _, err := g.client.Git.CreateCommit(ctx, owner, name, &github.Commit{
-		Message: github.Ptr(fix.Title),
+	commit, _, err := g.client.Git.CreateCommit(ctx, owner, name, &gh.Commit{
+		Message: gh.Ptr(fix.Title),
 		Tree:    tree,
-		Parents: []*github.Commit{{SHA: github.Ptr(baseSHA)}},
+		Parents: []*gh.Commit{{SHA: gh.Ptr(baseSHA)}},
 	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("create commit: %w", err)
 	}
 
 	// Create branch ref
-	_, _, err = g.client.Git.CreateRef(ctx, owner, name, &github.Reference{
-		Ref:    github.Ptr("refs/heads/" + fix.Branch),
-		Object: &github.GitObject{SHA: commit.SHA},
+	_, _, err = g.client.Git.CreateRef(ctx, owner, name, &gh.Reference{
+		Ref:    gh.Ptr("refs/heads/" + fix.Branch),
+		Object: &gh.GitObject{SHA: commit.SHA},
 	})
 	if err != nil {
 		return "", fmt.Errorf("create branch: %w", err)
 	}
 
 	// Create PR
-	pr, _, err := g.client.PullRequests.Create(ctx, owner, name, &github.NewPullRequest{
-		Title: github.Ptr(fix.Title),
-		Body:  github.Ptr(fix.Body),
-		Head:  github.Ptr(fix.Branch),
-		Base:  github.Ptr(defBranch),
+	pr, _, err := g.client.PullRequests.Create(ctx, owner, name, &gh.NewPullRequest{
+		Title: gh.Ptr(fix.Title),
+		Body:  gh.Ptr(fix.Body),
+		Head:  gh.Ptr(fix.Branch),
+		Base:  gh.Ptr(defBranch),
 	})
 	if err != nil {
 		return "", fmt.Errorf("create PR: %w", err)
@@ -137,7 +136,7 @@ func (g *ghClient) CreatePR(ctx context.Context, repo string, fix Fix) (string, 
 }
 
 // CommentOnPR posts a comment on the given PR.
-func (g *ghClient) CommentOnPR(ctx context.Context, repo string, prURL string, body string) error {
+func (g *Client) CommentOnPR(ctx context.Context, repo string, prURL string, body string) error {
 	owner, name := splitRepo(repo)
 
 	// Extract PR number from URL (format: .../pull/123)
@@ -151,8 +150,8 @@ func (g *ghClient) CommentOnPR(ctx context.Context, repo string, prURL string, b
 		return fmt.Errorf("could not parse PR number from URL: %s", prURL)
 	}
 
-	_, _, err := g.client.Issues.CreateComment(ctx, owner, name, prNumber, &github.IssueComment{
-		Body: github.Ptr(body),
+	_, _, err := g.client.Issues.CreateComment(ctx, owner, name, prNumber, &gh.IssueComment{
+		Body: gh.Ptr(body),
 	})
 	if err != nil {
 		return fmt.Errorf("comment on PR: %w", err)
@@ -161,12 +160,12 @@ func (g *ghClient) CommentOnPR(ctx context.Context, repo string, prURL string, b
 }
 
 // ListOpenClioPRs returns branch names of open PRs with the clio/ prefix.
-func (g *ghClient) ListOpenClioPRs(ctx context.Context, repo string) ([]string, error) {
+func (g *Client) ListOpenClioPRs(ctx context.Context, repo string) ([]string, error) {
 	owner, name := splitRepo(repo)
 
-	prs, _, err := g.client.PullRequests.List(ctx, owner, name, &github.PullRequestListOptions{
+	prs, _, err := g.client.PullRequests.List(ctx, owner, name, &gh.PullRequestListOptions{
 		State:       "open",
-		ListOptions: github.ListOptions{PerPage: 100},
+		ListOptions: gh.ListOptions{PerPage: 100},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list PRs: %w", err)
@@ -175,7 +174,7 @@ func (g *ghClient) ListOpenClioPRs(ctx context.Context, repo string) ([]string, 
 	var branches []string
 	for _, pr := range prs {
 		branch := pr.Head.GetRef()
-		if strings.HasPrefix(branch, branchPrefix) {
+		if strings.HasPrefix(branch, clio.BranchPrefix) {
 			branches = append(branches, branch)
 		}
 	}

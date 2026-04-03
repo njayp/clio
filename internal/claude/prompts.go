@@ -1,12 +1,14 @@
-package main
+package claude
 
 import (
 	"fmt"
 	"strings"
+
+	"github.com/njayp/clio"
 )
 
-// ClassifyPrompt builds the prompt for Claude to classify an error event.
-func ClassifyPrompt(event ErrorEvent) string {
+// classifyPrompt builds the prompt for Claude to classify an error event.
+func classifyPrompt(event clio.ErrorEvent) string {
 	var sb strings.Builder
 	sb.WriteString("You are a Kubernetes error classifier. Analyze the following error logs and determine if this is a code bug that can be fixed in the application source code, or an operational/infrastructure issue.\n\n")
 
@@ -61,8 +63,8 @@ Rules:
 	return sb.String()
 }
 
-// FixPrompt builds the prompt for Claude to generate a code fix.
-func FixPrompt(event ErrorEvent, class Classification, files map[string]string) string {
+// fixPrompt builds the prompt for Claude to generate a code fix.
+func fixPrompt(event clio.ErrorEvent, class clio.Classification, files map[string]string) string {
 	var sb strings.Builder
 	sb.WriteString("You are a code fix generator. Given error logs and the relevant source files, produce a minimal fix.\n\n")
 

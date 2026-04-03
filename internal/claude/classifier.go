@@ -1,4 +1,4 @@
-package main
+package claude
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/njayp/clio"
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
@@ -31,15 +32,15 @@ func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Mo
 	return nil
 }
 
-// ClaudeClassifier classifies errors using the Anthropic API.
-type ClaudeClassifier struct {
+// Classifier classifies errors using the Anthropic API.
+type Classifier struct {
 	client anthropic.Client
 	model  anthropic.Model
 }
 
-// NewClaudeClassifier creates a classifier with the given client and model.
-func NewClaudeClassifier(client anthropic.Client, model string) *ClaudeClassifier {
-	return &ClaudeClassifier{client: client, model: anthropic.Model(model)}
+// NewClassifier creates a classifier with the given client and model.
+func NewClassifier(client anthropic.Client, model string) *Classifier {
+	return &Classifier{client: client, model: anthropic.Model(model)}
 }
 
 type classifyResponse struct {
@@ -50,10 +51,10 @@ type classifyResponse struct {
 }
 
 // Classify sends the error event to Claude for classification.
-func (c *ClaudeClassifier) Classify(ctx context.Context, event ErrorEvent) (Classification, error) {
+func (c *Classifier) Classify(ctx context.Context, event clio.ErrorEvent) (clio.Classification, error) {
 	var cr classifyResponse
-	if err := callClaude(ctx, c.client, c.model, 1024, ClassifyPrompt(event), &cr); err != nil {
-		return Classification{}, fmt.Errorf("classify: %w", err)
+	if err := callClaude(ctx, c.client, c.model, 1024, classifyPrompt(event), &cr); err != nil {
+		return clio.Classification{}, fmt.Errorf("classify: %w", err)
 	}
 
 	slog.Info("classified error",
@@ -63,7 +64,7 @@ func (c *ClaudeClassifier) Classify(ctx context.Context, event ErrorEvent) (Clas
 		"summary", cr.Summary,
 	)
 
-	return Classification{
+	return clio.Classification{
 		IsCodeBug:     cr.IsCodeBug,
 		Summary:       cr.Summary,
 		Confidence:    cr.Confidence,

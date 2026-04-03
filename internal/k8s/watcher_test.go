@@ -1,9 +1,10 @@
-package main
+package k8s
 
 import (
 	"context"
 	"testing"
 
+	"github.com/njayp/clio"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -74,9 +75,9 @@ func TestGatherContext_PopulatesFields(t *testing.T) {
 	}
 
 	client := fake.NewSimpleClientset(deploy, currentRS, prevRS, pod, event)
-	w := &K8sWatcher{client: client, namespace: "staging"}
+	w := &Watcher{client: client, namespace: "staging"}
 
-	ev := &ErrorEvent{PodName: "myapp-abc-xyz", Namespace: "staging", Container: "web"}
+	ev := &clio.ErrorEvent{PodName: "myapp-abc-xyz", Namespace: "staging", Container: "web"}
 	if err := w.GatherContext(context.Background(), ev); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,9 +154,9 @@ func TestGatherContext_DetectsRollback(t *testing.T) {
 	}
 
 	client := fake.NewSimpleClientset(deploy, currentRS, badRS, pod)
-	w := &K8sWatcher{client: client, namespace: "staging"}
+	w := &Watcher{client: client, namespace: "staging"}
 
-	ev := &ErrorEvent{PodName: "myapp-old-xyz", Namespace: "staging", Container: "web"}
+	ev := &clio.ErrorEvent{PodName: "myapp-old-xyz", Namespace: "staging", Container: "web"}
 	if err := w.GatherContext(context.Background(), ev); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,9 +171,9 @@ func TestGatherContext_DetectsRollback(t *testing.T) {
 
 func TestGatherContext_NoPod(t *testing.T) {
 	client := fake.NewSimpleClientset()
-	w := &K8sWatcher{client: client, namespace: "staging"}
+	w := &Watcher{client: client, namespace: "staging"}
 
-	ev := &ErrorEvent{PodName: "nonexistent", Namespace: "staging", Container: "web"}
+	ev := &clio.ErrorEvent{PodName: "nonexistent", Namespace: "staging", Container: "web"}
 	err := w.GatherContext(context.Background(), ev)
 	if err != nil {
 		t.Fatalf("expected nil error for best-effort, got: %v", err)

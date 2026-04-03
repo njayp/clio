@@ -1,4 +1,4 @@
-package main
+package k8s
 
 import "strings"
 
@@ -19,13 +19,13 @@ var errorPatterns = []string{
 
 // stackTracePatterns indicate a line is part of a stack trace continuation.
 var stackTracePatterns = []string{
-	"\tat ",        // Java stack trace
-	"goroutine ",   // Go goroutine header
-	"\t/",          // Go stack trace file paths
-	"  File \"",    // Python traceback
-	"    at ",      // Node.js/JS stack trace
-	"    raise ",   // Python raise
-	"    return ",  // Python traceback context
+	"\tat ",       // Java stack trace
+	"goroutine ",  // Go goroutine header
+	"\t/",         // Go stack trace file paths
+	"  File \"",   // Python traceback
+	"    at ",     // Node.js/JS stack trace
+	"    raise ",  // Python raise
+	"    return ", // Python traceback context
 }
 
 // IsErrorLine returns true if a log line looks like an error or part of a stack trace.

@@ -1,4 +1,4 @@
-package main
+package claude
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/njayp/clio"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
@@ -40,13 +41,13 @@ func anthropicResponse(t *testing.T, text string) http.HandlerFunc {
 	}
 }
 
-func TestClaudeClassifier_CodeBug(t *testing.T) {
+func TestClassifier_CodeBug(t *testing.T) {
 	respJSON := `{"is_code_bug": true, "summary": "Nil pointer in auth handler", "confidence": 0.9, "relevant_files": ["pkg/auth/handler.go"]}`
 
 	client := newTestAnthropicClient(t, anthropicResponse(t, respJSON))
-	classifier := NewClaudeClassifier(client, "claude-sonnet-4-20250514")
+	classifier := NewClassifier(client, "claude-sonnet-4-20250514")
 
-	event := ErrorEvent{
+	event := clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
@@ -69,19 +70,19 @@ func TestClaudeClassifier_CodeBug(t *testing.T) {
 	}
 }
 
-func TestClaudeClassifier_OperationalIssue(t *testing.T) {
+func TestClassifier_OperationalIssue(t *testing.T) {
 	respJSON := `{"is_code_bug": false, "summary": "Pod killed due to memory limits", "confidence": 0.95, "relevant_files": []}`
 
 	client := newTestAnthropicClient(t, anthropicResponse(t, respJSON))
-	classifier := NewClaudeClassifier(client, "claude-sonnet-4-20250514")
+	classifier := NewClassifier(client, "claude-sonnet-4-20250514")
 
-	event := ErrorEvent{
+	event := clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
 		Container: "web",
 		Repo:      "owner/repo",
 		LogLines:  []string{"OOMKilled"},
-		K8sContext: &K8sContext{
+		K8sContext: &clio.K8sContext{
 			Events: []string{"OOMKilled"},
 		},
 	}
@@ -95,7 +96,7 @@ func TestClaudeClassifier_OperationalIssue(t *testing.T) {
 	}
 }
 
-func TestClaudeClassifier_APIError(t *testing.T) {
+func TestClassifier_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": {"type": "server_error", "message": "internal error"}}`))
@@ -106,9 +107,9 @@ func TestClaudeClassifier_APIError(t *testing.T) {
 		option.WithAPIKey("test-key"),
 		option.WithBaseURL(server.URL),
 	)
-	classifier := NewClaudeClassifier(client, "claude-sonnet-4-20250514")
+	classifier := NewClassifier(client, "claude-sonnet-4-20250514")
 
-	_, err := classifier.Classify(context.Background(), ErrorEvent{LogLines: []string{"ERROR"}})
+	_, err := classifier.Classify(context.Background(), clio.ErrorEvent{LogLines: []string{"ERROR"}})
 	if err == nil {
 		t.Error("expected error from API failure")
 	}
