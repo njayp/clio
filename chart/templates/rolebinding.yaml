@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "clio.fullname" . }}
+  labels:
+    {{- include "clio.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "clio.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "clio.fullname" . }}
+    namespace: {{ .Release.Namespace }}

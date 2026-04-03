@@ -1,0 +1,6 @@
+apiVersion: v2
+name: clio
+description: Kubernetes auto-fix agent that watches pods for errors and opens PRs
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

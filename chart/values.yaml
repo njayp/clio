@@ -1,0 +1,23 @@
+repo: ""          # required: owner/repo (set by parent chart)
+target: ""        # optional: app.kubernetes.io/name (empty = all pods in release)
+secretName: ""    # required: name of Secret containing ANTHROPIC_API_KEY and GITHUB_TOKEN
+model: "claude-sonnet-4-20250514"
+cooldown: "1h"
+maxConcurrency: 3
+tailLines: 100
+maxPRsPerHour: 5
+batchWindow: "5s"
+dryRun: false     # set true for initial rollout observation
+port: 8080
+serviceMonitor:
+  enabled: false  # set true if prometheus-operator CRDs are installed
+image:
+  repository: ghcr.io/njayp/clio
+  tag: latest
+resources:
+  requests:
+    memory: 64Mi
+    cpu: 100m
+  limits:
+    memory: 256Mi
+    cpu: 500m

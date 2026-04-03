@@ -16,3 +16,4 @@ UPDATE THIS FILE (CLAUDE.md) AND README.md AS NEEDED
 - **KISS** — keep it simple, stupid
 - **less is more** — prefer simplicity and elegance. remove unnecessary code
 - **test behavior** — prefer testing behavior over implementation details
+- **log levels** — errors: something failed that shouldn't have; warnings: system works but is degraded or misconfigured; info: normal operations worth noting
