@@ -44,8 +44,8 @@ func NewAgent(ws *Workspace, cfg clio.Config) *Agent {
 }
 
 // Run investigates an error event using Claude Code in a git worktree.
-// Returns nil if the agent determines the error is not a code bug.
-func (a *Agent) Run(ctx context.Context, event clio.ErrorEvent) (*clio.Fix, error) {
+// Returns the agent's result, or nil if the error is not actionable.
+func (a *Agent) Run(ctx context.Context, event clio.ErrorEvent) (*clio.AgentResult, error) {
 	start := time.Now()
 
 	if err := a.ws.EnsureClone(ctx); err != nil {
@@ -54,21 +54,36 @@ func (a *Agent) Run(ctx context.Context, event clio.ErrorEvent) (*clio.Fix, erro
 	}
 
 	fp := clio.Fingerprint(event)
-	tmpBranch := fmt.Sprintf("clio-tmp-%s-%d", fp[:8], time.Now().Unix())
-	wtDir, err := a.ws.CreateWorktree(ctx, tmpBranch)
+	branch := fmt.Sprintf("%sfix-%s", clio.BranchPrefix, fp[:8])
+
+	// Clean up stale branch from previous incomplete runs
+	a.ws.DeleteBranch(ctx, branch)
+
+	wtDir, err := a.ws.CreateWorktree(ctx, branch)
 	if err != nil {
 		agentOutcome.WithLabelValues("error").Inc()
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 	defer a.ws.RemoveWorktree(ctx, wtDir)
 
-	prompt := BuildPrompt(event)
+	prompt := BuildPrompt(event, branch)
 
-	// Build claude command
+	// Build allowed tools list
+	allowedTools := []string{
+		"Read", "Write", "Edit", "Glob", "Grep",
+		"Bash(go build ./...)", "Bash(go test ./...)", "Bash(go vet ./...)",
+		"Bash(git diff)", "Bash(git status)", "Bash(git add)", "Bash(git commit)", "Bash(git reset)",
+	}
+	if !a.cfg.DryRun {
+		allowedTools = append(allowedTools,
+			"Bash(git push)", "Bash(gh pr create)", "Bash(gh issue create)",
+		)
+	}
+
 	args := []string{
 		"-p", prompt,
 		"--output-format", "json",
-		"--allowedTools", "Read,Write,Edit,Glob,Grep,Bash(go build ./...),Bash(go test ./...),Bash(go vet ./...),Bash(git diff),Bash(git status)",
+		"--allowedTools", strings.Join(allowedTools, ","),
 		"--max-turns", strconv.Itoa(a.cfg.MaxAgentTurns),
 		"--max-cost", a.cfg.MaxAgentBudget,
 		"--append-system-prompt", SystemPrompt(),
@@ -76,8 +91,15 @@ func (a *Agent) Run(ctx context.Context, event clio.ErrorEvent) (*clio.Fix, erro
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = wtDir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Clio",
+		"GIT_AUTHOR_EMAIL=clio@noreply.github.com",
+		"GIT_COMMITTER_NAME=Clio",
+		"GIT_COMMITTER_EMAIL=clio@noreply.github.com",
+		"GITHUB_TOKEN="+a.cfg.GitHubToken,
+	)
 
-	slog.Info("spawning agent", "pod", event.PodName, "worktree", wtDir)
+	slog.Info("spawning agent", "pod", event.PodName, "branch", branch, "worktree", wtDir, "dry_run", a.cfg.DryRun)
 	output, err := cmd.CombinedOutput()
 	duration := time.Since(start).Seconds()
 	agentDuration.Observe(duration)
@@ -101,43 +123,20 @@ func (a *Agent) Run(ctx context.Context, event clio.ErrorEvent) (*clio.Fix, erro
 		return nil, fmt.Errorf("parse RESULT.json: %w (raw: %s)", err, data)
 	}
 
-	if !result.IsCodeBug {
+	switch {
+	case result.PRURL != "":
+		agentOutcome.WithLabelValues("pr_created").Inc()
+		slog.Info("agent created PR", "pod", event.PodName, "pr_url", result.PRURL, "duration_s", duration)
+	case result.IssueURL != "":
+		agentOutcome.WithLabelValues("issue_created").Inc()
+		slog.Info("agent created issue", "pod", event.PodName, "issue_url", result.IssueURL, "duration_s", duration)
+	case result.IsCodeBug:
+		agentOutcome.WithLabelValues("code_bug_no_pr").Inc()
+		slog.Warn("agent found code bug but did not create PR", "pod", event.PodName, "reasoning", result.Reasoning)
+	default:
 		agentOutcome.WithLabelValues("operational").Inc()
-		slog.Info("agent determined operational issue",
-			"pod", event.PodName,
-			"reasoning", result.Reasoning,
-		)
-		return nil, nil
+		slog.Info("agent determined operational issue", "pod", event.PodName, "reasoning", result.Reasoning)
 	}
 
-	// Stage changes and get clean diff (excludes RESULT.json)
-	diff, err := a.ws.StageAndDiff(ctx, wtDir)
-	if err != nil {
-		slog.Warn("failed to stage and diff", "error", err)
-	}
-
-	// Generate branch name and commit+push (changes already staged)
-	branch := clio.BranchName(fp, result.Title)
-	if err := a.ws.CommitAndPush(ctx, wtDir, branch, result.Title); err != nil {
-		agentOutcome.WithLabelValues("error").Inc()
-		return nil, fmt.Errorf("commit and push: %w", err)
-	}
-
-	agentOutcome.WithLabelValues("code_bug").Inc()
-	rawLogs := strings.Join(event.LogLines, "\n")
-
-	slog.Info("agent generated fix",
-		"pod", event.PodName,
-		"branch", branch,
-		"duration_s", duration,
-	)
-
-	return &clio.Fix{
-		Branch:    branch,
-		Title:     result.Title,
-		Body:      result.Body,
-		DiffPatch: diff,
-		RawLogs:   rawLogs,
-		Reasoning: result.Reasoning,
-	}, nil
+	return &result, nil
 }

@@ -97,49 +97,11 @@ func (w *Workspace) CreateWorktree(ctx context.Context, branch string) (string, 
 	return wtDir, nil
 }
 
-// StageAndDiff stages all changes (excluding RESULT.json) and returns the staged diff.
-func (w *Workspace) StageAndDiff(ctx context.Context, wtDir string) (string, error) {
-	// Stage all changes
-	add := exec.CommandContext(ctx, "git", "add", "-A")
-	add.Dir = wtDir
-	if out, err := add.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git add: %w\n%s", err, out)
-	}
-
-	// Unstage RESULT.json so it's not committed or in the diff
-	reset := exec.CommandContext(ctx, "git", "reset", "HEAD", "RESULT.json")
-	reset.Dir = wtDir
-	_ = reset.Run() // ignore error if RESULT.json wasn't staged
-
-	// Get the staged diff (clean, excludes RESULT.json)
-	cmd := exec.CommandContext(ctx, "git", "diff", "--staged")
-	cmd.Dir = wtDir
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git diff --staged: %w", err)
-	}
-	return string(out), nil
-}
-
-// CommitAndPush commits already-staged changes and pushes.
-func (w *Workspace) CommitAndPush(ctx context.Context, wtDir, branch, message string) error {
-	// Commit
-	commit := exec.CommandContext(ctx, "git",
-		"-c", "user.name=Clio",
-		"-c", "user.email=clio@noreply.github.com",
-		"commit", "-m", message)
-	commit.Dir = wtDir
-	if out, err := commit.CombinedOutput(); err != nil {
-		return fmt.Errorf("git commit: %w\n%s", err, out)
-	}
-
-	// Push
-	push := exec.CommandContext(ctx, "git", "push", w.repoURL(), branch)
-	push.Dir = wtDir
-	if out, err := push.CombinedOutput(); err != nil {
-		return fmt.Errorf("git push: %w\n%s", err, out)
-	}
-	return nil
+// DeleteBranch removes a local branch from the bare clone (best-effort, ignores errors).
+func (w *Workspace) DeleteBranch(ctx context.Context, branch string) {
+	cmd := exec.CommandContext(ctx, "git", "branch", "-D", branch)
+	cmd.Dir = w.bareDir
+	_ = cmd.Run()
 }
 
 // RemoveWorktree cleans up a worktree directory.

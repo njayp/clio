@@ -14,17 +14,24 @@ func TestAgentResult_Parse(t *testing.T) {
 		input     string
 		wantBug   bool
 		wantTitle string
+		wantPRURL string
 		wantErr   bool
 	}{
 		{
-			name:      "code bug",
-			input:     `{"is_code_bug": true, "title": "Fix nil pointer", "body": "Adds nil check", "reasoning": "Missing nil check"}`,
+			name:      "code bug with PR",
+			input:     `{"is_code_bug": true, "pr_url": "https://github.com/owner/repo/pull/1", "title": "Fix nil pointer", "reasoning": "Missing nil check"}`,
 			wantBug:   true,
 			wantTitle: "Fix nil pointer",
+			wantPRURL: "https://github.com/owner/repo/pull/1",
+		},
+		{
+			name:    "operational issue with issue URL",
+			input:   `{"is_code_bug": false, "issue_url": "https://github.com/owner/repo/issues/2", "title": "", "reasoning": "Misconfigured memory limits"}`,
+			wantBug: false,
 		},
 		{
 			name:    "operational issue",
-			input:   `{"is_code_bug": false, "title": "", "body": "", "reasoning": "OOMKilled due to memory limits"}`,
+			input:   `{"is_code_bug": false, "title": "", "reasoning": "OOMKilled due to memory limits"}`,
 			wantBug: false,
 		},
 		{
@@ -53,6 +60,9 @@ func TestAgentResult_Parse(t *testing.T) {
 			if result.Title != tt.wantTitle {
 				t.Errorf("Title = %q, want %q", result.Title, tt.wantTitle)
 			}
+			if result.PRURL != tt.wantPRURL {
+				t.Errorf("PRURL = %q, want %q", result.PRURL, tt.wantPRURL)
+			}
 		})
 	}
 }
@@ -72,7 +82,7 @@ func TestBuildPrompt(t *testing.T) {
 		},
 	}
 
-	prompt := BuildPrompt(event)
+	prompt := BuildPrompt(event, "clio/fix-abc12345")
 
 	checks := []string{
 		"Pod: app-1",
@@ -85,6 +95,10 @@ func TestBuildPrompt(t *testing.T) {
 		"RESULT.json",
 		"go build",
 		"go test",
+		"clio/fix-abc12345",
+		"gh pr create",
+		"gh issue create",
+		"git push origin",
 	}
 	for _, check := range checks {
 		if !strings.Contains(prompt, check) {
@@ -100,5 +114,8 @@ func TestSystemPrompt(t *testing.T) {
 	}
 	if !strings.Contains(sp, "RESULT.json") {
 		t.Error("system prompt should mention RESULT.json")
+	}
+	if !strings.Contains(sp, "gh pr create") {
+		t.Error("system prompt should mention gh pr create")
 	}
 }

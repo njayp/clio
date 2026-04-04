@@ -1,7 +1,6 @@
 package clio
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -23,18 +22,5 @@ func TestFingerprint_OrderIndependent(t *testing.T) {
 	e2 := ErrorEvent{Container: "web", Repo: "owner/repo", LogLines: []string{"ERROR b", "ERROR a"}}
 	if Fingerprint(e1) != Fingerprint(e2) {
 		t.Error("fingerprints should be order-independent")
-	}
-}
-
-func TestBranchName_Format(t *testing.T) {
-	event := ErrorEvent{Container: "web", Repo: "owner/repo", LogLines: []string{"ERROR"}}
-	fp := Fingerprint(event)
-	branch := BranchName(fp, "Fix null pointer in auth handler")
-
-	if !strings.HasPrefix(branch, "clio/") {
-		t.Errorf("branch %q should have clio/ prefix", branch)
-	}
-	if strings.Contains(branch, " ") {
-		t.Errorf("branch %q should not contain spaces", branch)
 	}
 }

@@ -20,8 +20,12 @@ var (
 		Name: "clio_prs_skipped_total",
 		Help: "Total PRs skipped by reason",
 	}, []string{"reason"})
+	issuesOpened = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "clio_issues_opened_total",
+		Help: "Total GitHub issues opened",
+	})
 )
 
 func init() {
-	prometheus.MustRegister(errorsDetected, errorsClassified, prsOpened, prsSkipped)
+	prometheus.MustRegister(errorsDetected, errorsClassified, prsOpened, prsSkipped, issuesOpened)
 }

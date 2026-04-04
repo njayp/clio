@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -36,19 +35,10 @@ type K8sContext struct {
 // AgentResult is the JSON output the Claude Code agent writes to RESULT.json.
 type AgentResult struct {
 	IsCodeBug bool   `json:"is_code_bug"`
+	PRURL     string `json:"pr_url,omitempty"`
+	IssueURL  string `json:"issue_url,omitempty"`
 	Title     string `json:"title"`
-	Body      string `json:"body"`
 	Reasoning string `json:"reasoning"`
-}
-
-// Fix is a proposed code change to address an error.
-type Fix struct {
-	Branch    string
-	Title     string
-	Body      string
-	DiffPatch string // unified diff from worktree
-	RawLogs   string
-	Reasoning string
 }
 
 // Fingerprint generates a stable hash for an error event.
@@ -64,22 +54,4 @@ func Fingerprint(e ErrorEvent) string {
 		fmt.Fprintln(h, l)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))[:16]
-}
-
-// BranchName generates a clio/ prefixed branch name for an error event.
-func BranchName(fp string, summary string) string {
-	slug := strings.ToLower(summary)
-	slug = strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			return r
-		}
-		return '-'
-	}, slug)
-	// Trim leading/trailing dashes and collapse multiples
-	parts := strings.FieldsFunc(slug, func(r rune) bool { return r == '-' })
-	slug = strings.Join(parts, "-")
-	if len(slug) > 40 {
-		slug = slug[:40]
-	}
-	return fmt.Sprintf("%s%s-%s", BranchPrefix, slug, fp[:8])
 }

@@ -17,7 +17,6 @@ const (
 	skipExistingPR = "existing_pr"
 	skipRollback   = "rollback"
 	skipRateLimit  = "rate_limit"
-	skipDryRun     = "dry_run"
 
 	classCodeBug     = "code_bug"
 	classOperational = "operational"
@@ -30,13 +29,11 @@ type Triage interface {
 
 // Agent investigates and fixes errors using Claude Code.
 type Agent interface {
-	Run(ctx context.Context, event clio.ErrorEvent) (*clio.Fix, error)
+	Run(ctx context.Context, event clio.ErrorEvent) (*clio.AgentResult, error)
 }
 
-// GitHubClient interacts with the GitHub API for PR management.
+// GitHubClient interacts with the GitHub API for dedup checks.
 type GitHubClient interface {
-	CreatePRFromBranch(ctx context.Context, repo string, fix clio.Fix) (prURL string, err error)
-	CommentOnPR(ctx context.Context, repo string, prURL string, body string) error
 	ListOpenClioPRs(ctx context.Context, repo string) ([]string, error)
 }
 
@@ -164,57 +161,41 @@ func (p *Pipeline) processEvent(ctx context.Context, event clio.ErrorEvent) {
 		return
 	}
 
-	// Rate limit check
-	if !p.allowPR() {
+	// Rate limit check (pre-check only; slot recorded after PR confirmed)
+	if !p.canPR() {
 		prsSkipped.WithLabelValues(skipRateLimit).Inc()
-		slog.Warn("rate limit reached, skipping PR", "pod", event.PodName)
+		slog.Warn("rate limit reached, skipping", "pod", event.PodName)
 		return
 	}
 
 	// Spawn agent to investigate and fix
-	fix, err := p.agent.Run(ctx, event)
+	result, err := p.agent.Run(ctx, event)
 	if err != nil {
 		slog.Error("agent failed", "pod", event.PodName, "error", err)
 		return
 	}
 
-	// Agent determined this is not a code bug
-	if fix == nil {
+	// Classify result
+	switch {
+	case result.PRURL != "":
+		p.recordPR()
+		errorsClassified.WithLabelValues(classCodeBug).Inc()
+		prsOpened.Inc()
+		slog.Info("agent opened PR", "pod", event.PodName, "pr_url", result.PRURL)
+	case result.IssueURL != "":
 		errorsClassified.WithLabelValues(classOperational).Inc()
-		return
+		issuesOpened.Inc()
+		slog.Info("agent opened issue", "pod", event.PodName, "issue_url", result.IssueURL)
+	case result.IsCodeBug:
+		errorsClassified.WithLabelValues(classCodeBug).Inc()
+		slog.Warn("agent found code bug but no PR created", "pod", event.PodName)
+	default:
+		errorsClassified.WithLabelValues(classOperational).Inc()
 	}
-	errorsClassified.WithLabelValues(classCodeBug).Inc()
-
-	// Dry run mode
-	if p.cfg.DryRun {
-		prsSkipped.WithLabelValues(skipDryRun).Inc()
-		slog.Info("dry run: would open PR",
-			"pod", event.PodName,
-			"branch", fix.Branch,
-			"title", fix.Title,
-		)
-		return
-	}
-
-	// Create PR (branch already pushed by agent)
-	prURL, err := p.gh.CreatePRFromBranch(ctx, event.Repo, *fix)
-	if err != nil {
-		slog.Error("failed to create PR", "pod", event.PodName, "error", err)
-		return
-	}
-	prsOpened.Inc()
-
-	// Comment on PR with context
-	comment := formatPRComment(event, *fix)
-	if err := p.gh.CommentOnPR(ctx, event.Repo, prURL, comment); err != nil {
-		slog.Error("failed to comment on PR", "url", prURL, "error", err)
-	}
-
-	slog.Info("PR opened successfully", "url", prURL, "pod", event.PodName)
 }
 
-// allowPR checks and records a PR against the rate limit.
-func (p *Pipeline) allowPR() bool {
+// canPR checks whether the rate limit allows another PR (does not consume a slot).
+func (p *Pipeline) canPR() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -230,37 +211,12 @@ func (p *Pipeline) allowPR() bool {
 	}
 	p.prTimes = valid
 
-	if len(p.prTimes) >= p.cfg.MaxPRsPerHour {
-		return false
-	}
-	p.prTimes = append(p.prTimes, now)
-	return true
+	return len(p.prTimes) < p.cfg.MaxPRsPerHour
 }
 
-func formatPRComment(event clio.ErrorEvent, fix clio.Fix) string {
-	var sb strings.Builder
-	sb.WriteString("## Clio Auto-Fix Context\n\n")
-
-	sb.WriteString("### Reasoning\n")
-	sb.WriteString(fix.Reasoning)
-	sb.WriteString("\n\n")
-
-	sb.WriteString("### Raw Logs\n```\n")
-	sb.WriteString(fix.RawLogs)
-	sb.WriteString("\n```\n")
-
-	if event.K8sContext != nil {
-		sb.WriteString("\n### Kubernetes Context\n")
-		if event.K8sContext.DeployName != "" {
-			sb.WriteString(fmt.Sprintf("- **Deployment:** %s\n", event.K8sContext.DeployName))
-		}
-		if event.K8sContext.ImageTag != "" {
-			sb.WriteString(fmt.Sprintf("- **Image:** %s\n", event.K8sContext.ImageTag))
-		}
-		if event.K8sContext.PrevImageTag != "" {
-			sb.WriteString(fmt.Sprintf("- **Previous Image:** %s\n", event.K8sContext.PrevImageTag))
-		}
-	}
-
-	return sb.String()
+// recordPR records a PR creation against the rate limit.
+func (p *Pipeline) recordPR() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prTimes = append(p.prTimes, time.Now())
 }
