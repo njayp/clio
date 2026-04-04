@@ -2,6 +2,9 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,7 +70,7 @@ func TestAgentResult_Parse(t *testing.T) {
 	}
 }
 
-func TestBuildPrompt(t *testing.T) {
+func TestBuildInvestigationPrompt(t *testing.T) {
 	event := clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
@@ -82,9 +85,9 @@ func TestBuildPrompt(t *testing.T) {
 		},
 	}
 
-	prompt := BuildPrompt(event, "clio/fix-abc12345")
+	prompt := BuildInvestigationPrompt(event, "clio/fix-abc12345")
 
-	checks := []string{
+	mustContain := []string{
 		"Pod: app-1",
 		"Namespace: staging",
 		"Container: web",
@@ -92,30 +95,137 @@ func TestBuildPrompt(t *testing.T) {
 		"Deployment: myapp",
 		"Image Tag: v1.2.3",
 		"Replicas: 3",
-		"RESULT.json",
-		"go build",
-		"go test",
+		"clio-plan.md",
+		"Do NOT modify source code",
 		"clio/fix-abc12345",
-		"gh pr create",
-		"gh issue create",
-		"git push origin",
 	}
-	for _, check := range checks {
+	for _, check := range mustContain {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("prompt missing %q", check)
 		}
 	}
+
+	mustNotContain := []string{"gh pr create", "git push origin", "git commit"}
+	for _, check := range mustNotContain {
+		if strings.Contains(prompt, check) {
+			t.Errorf("prompt should not contain %q", check)
+		}
+	}
 }
 
-func TestSystemPrompt(t *testing.T) {
-	sp := SystemPrompt()
+func TestInvestigationSystemPrompt(t *testing.T) {
+	sp := InvestigationSystemPrompt()
 	if !strings.Contains(sp, "Clio") {
 		t.Error("system prompt should mention Clio")
 	}
-	if !strings.Contains(sp, "RESULT.json") {
-		t.Error("system prompt should mention RESULT.json")
+	if !strings.Contains(sp, "Investigation") {
+		t.Error("system prompt should mention Investigation")
 	}
-	if !strings.Contains(sp, "gh pr create") {
-		t.Error("system prompt should mention gh pr create")
+	if strings.Contains(sp, "gh pr create") {
+		t.Error("system prompt should not contain \"gh pr create\"")
+	}
+}
+
+func TestBuildPRBody(t *testing.T) {
+	event := clio.ErrorEvent{
+		PodName:   "app-1",
+		Namespace: "staging",
+		Container: "web",
+		Repo:      "owner/repo",
+		LogLines:  []string{"panic: nil pointer dereference"},
+		K8sContext: &clio.K8sContext{
+			DeployName: "myapp",
+			Replicas:   2,
+		},
+	}
+
+	body := BuildPRBody(event, "Fix the nil pointer in handler.go line 42")
+
+	mustContain := []string{
+		"Pod: app-1",
+		"Namespace: staging",
+		"panic: nil pointer dereference",
+		"Fix the nil pointer in handler.go line 42",
+	}
+	for _, check := range mustContain {
+		if !strings.Contains(body, check) {
+			t.Errorf("PR body missing %q", check)
+		}
+	}
+}
+
+func TestWriteClaudeConfig(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteClaudeConfig(dir, clio.ClaudeConfig); err != nil {
+		t.Fatalf("WriteClaudeConfig: %v", err)
+	}
+
+	expected := []string{
+		".claude/skills/go/SKILL.md",
+		".claude/agents/plan-reviewer.md",
+	}
+	for _, path := range expected {
+		full := filepath.Join(dir, path)
+		if _, err := os.Stat(full); err != nil {
+			t.Errorf("expected file %s to exist: %v", path, err)
+		}
+	}
+}
+
+func TestScaleBudget(t *testing.T) {
+	tests := []struct {
+		total string
+		pct   int
+		want  string
+	}{
+		{"2.00", 25, "0.50"},
+		{"2.00", 15, "0.30"},
+		{"2.00", 50, "1.00"},
+		{"invalid", 25, "invalid"},
+	}
+	for _, tt := range tests {
+		got := scaleBudget(tt.total, tt.pct)
+		if got != tt.want {
+			t.Errorf("scaleBudget(%q, %d) = %q, want %q", tt.total, tt.pct, got, tt.want)
+		}
+	}
+}
+
+func TestReadResult(t *testing.T) {
+	dir := t.TempDir()
+
+	// Missing file should wrap os.ErrNotExist
+	_, err := readResult(dir)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected os.ErrNotExist, got %v", err)
+	}
+
+	// Valid file should parse
+	os.WriteFile(filepath.Join(dir, "RESULT.json"), []byte(`{"is_code_bug":false,"reasoning":"OOM"}`), 0o644)
+	result, err := readResult(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsCodeBug {
+		t.Error("expected IsCodeBug=false")
+	}
+}
+
+func TestAppendToGitignore(t *testing.T) {
+	dir := t.TempDir()
+	if err := appendToGitignore(dir, "clio-plan.md", "RESULT.json"); err != nil {
+		t.Fatalf("appendToGitignore: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "clio-plan.md") {
+		t.Error(".gitignore missing clio-plan.md")
+	}
+	if !strings.Contains(content, "RESULT.json") {
+		t.Error(".gitignore missing RESULT.json")
 	}
 }

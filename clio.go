@@ -2,10 +2,14 @@ package clio
 
 import (
 	"crypto/sha256"
+	"embed"
 	"fmt"
 	"sort"
 	"time"
 )
+
+//go:embed all:.claude
+var ClaudeConfig embed.FS
 
 // BranchPrefix is the prefix for all clio-created branches.
 const BranchPrefix = "clio/"

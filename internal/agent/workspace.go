@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -111,4 +113,31 @@ func (w *Workspace) RemoveWorktree(ctx context.Context, wtDir string) {
 	if err := rm.Run(); err != nil {
 		slog.Warn("failed to remove worktree", "dir", wtDir, "error", err)
 	}
+}
+
+// WriteClaudeConfig writes an embedded .claude/ filesystem into the given worktree directory.
+func WriteClaudeConfig(wtDir string, fsys fs.FS) error {
+	return fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(wtDir, path)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		src, err := fsys.Open(path)
+		if err != nil {
+			return fmt.Errorf("open embedded %s: %w", path, err)
+		}
+		defer src.Close()
+		dst, err := os.Create(target)
+		if err != nil {
+			return fmt.Errorf("create %s: %w", target, err)
+		}
+		defer dst.Close()
+		if _, err := io.Copy(dst, src); err != nil {
+			return fmt.Errorf("write %s: %w", target, err)
+		}
+		return nil
+	})
 }

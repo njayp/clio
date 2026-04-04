@@ -60,11 +60,11 @@ func TestLoadConfig_Valid(t *testing.T) {
 	if cfg.Port != 8080 {
 		t.Errorf("Port = %d, want 8080", cfg.Port)
 	}
-	if cfg.MaxAgentTurns != 25 {
-		t.Errorf("MaxAgentTurns = %d, want 25", cfg.MaxAgentTurns)
+	if cfg.MaxAgentTurns != 50 {
+		t.Errorf("MaxAgentTurns = %d, want 50", cfg.MaxAgentTurns)
 	}
-	if cfg.MaxAgentBudget != "1.00" {
-		t.Errorf("MaxAgentBudget = %q, want %q", cfg.MaxAgentBudget, "1.00")
+	if cfg.MaxAgentBudget != "2.00" {
+		t.Errorf("MaxAgentBudget = %q, want %q", cfg.MaxAgentBudget, "2.00")
 	}
 }
 

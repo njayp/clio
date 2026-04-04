@@ -33,7 +33,7 @@ func LoadConfig() (Config, error) {
 		Target:         os.Getenv("CLIO_TARGET"),
 		GitHubToken:    os.Getenv("GITHUB_TOKEN"),
 		Namespace:      os.Getenv("CLIO_NAMESPACE"),
-		MaxAgentBudget: envOrDefault("CLIO_MAX_AGENT_BUDGET", "1.00"),
+		MaxAgentBudget: envOrDefault("CLIO_MAX_AGENT_BUDGET", "2.00"),
 	}
 
 	if c.Repo == "" {
@@ -86,7 +86,7 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	c.MaxAgentTurns, err = parseInt("CLIO_MAX_AGENT_TURNS", 25)
+	c.MaxAgentTurns, err = parseInt("CLIO_MAX_AGENT_TURNS", 50)
 	if err != nil {
 		return c, err
 	}

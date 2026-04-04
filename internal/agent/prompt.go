@@ -7,12 +7,8 @@ import (
 	"github.com/njayp/clio"
 )
 
-// BuildPrompt constructs the prompt passed to `claude -p` with error context.
-func BuildPrompt(event clio.ErrorEvent, branch string) string {
-	var sb strings.Builder
-
-	sb.WriteString("Investigate the following Kubernetes error and determine if it is a code bug that can be fixed in this repository.\n\n")
-
+// writeErrorContext appends pod metadata and K8s context to a builder.
+func writeErrorContext(sb *strings.Builder, event clio.ErrorEvent) {
 	sb.WriteString("## Error Logs\n")
 	sb.WriteString(fmt.Sprintf("Pod: %s\nNamespace: %s\nContainer: %s\nRepo: %s\n\n", event.PodName, event.Namespace, event.Container, event.Repo))
 	sb.WriteString("```\n")
@@ -45,90 +41,77 @@ func BuildPrompt(event clio.ErrorEvent, branch string) string {
 		}
 		sb.WriteString("\n")
 	}
+}
+
+// BuildInvestigationPrompt constructs the prompt for the investigation step.
+// The agent investigates the error and writes clio-plan.md (code bug) or RESULT.json (operational).
+func BuildInvestigationPrompt(event clio.ErrorEvent, branch string) string {
+	var sb strings.Builder
+
+	sb.WriteString("Investigate the following Kubernetes error and determine if it is a code bug that can be fixed in this repository.\n\n")
+	writeErrorContext(&sb, event)
 
 	sb.WriteString(fmt.Sprintf(`## Instructions
 
 Your working branch is: %s
 
+Do NOT modify source code. Your job is investigation only.
+
 1. Read the error logs and Kubernetes context above.
 2. Search the codebase for relevant files (use stack traces, error messages, and package names as clues).
 3. Determine if this is a code bug fixable in this repository, or an operational/infrastructure issue.
 4. If it IS a code bug:
-   a. Make the minimal fix needed — do not refactor or improve unrelated code.
-   b. Run `+"`go build ./...`"+` to verify compilation.
-   c. Run `+"`go test ./...`"+` to verify tests pass.
-   d. Iterate until both pass.
-   e. Stage and commit your changes:
-      - `+"`git add -A && git reset HEAD RESULT.json`"+`
-      - `+"`git commit -m \"<short imperative description of fix>\"`"+`
-   f. Push your branch:
-      - `+"`git push origin %s`"+`
-   g. Create a pull request:
-      - `+"`gh pr create --title \"<PR title>\" --body \"<PR body with K8s context and reasoning>\"`"+`
-   h. Record the PR URL in RESULT.json (see below).
+   a. Write a file named clio-plan.md in the repository root with:
+      - Root cause analysis
+      - Step-by-step fix instructions (specific files, line numbers, what to change)
+      - Critical files involved
+   b. Do NOT make any code changes — only write the plan.
 5. If it is NOT a code bug but needs human attention (e.g. misconfigured resource limits, bad config map values):
    a. Create a GitHub issue:
       - `+"`gh issue create --title \"<issue title>\" --body \"<description with K8s context>\"`"+`
-   b. Record the issue URL in RESULT.json (see below).
+   b. Write RESULT.json (see below). Do NOT write clio-plan.md.
    c. Do NOT create an issue for purely operational problems (OOM, DNS resolution, image pull errors) — just write RESULT.json.
-6. Write a file named RESULT.json in the repository root with this exact format:
+6. If it is NOT a code bug (no issue needed), write RESULT.json:
 
-`, branch, branch))
+`, branch))
 
-	sb.WriteString("```json\n")
-	sb.WriteString(`{
-  "is_code_bug": true,
-  "pr_url": "https://github.com/owner/repo/pull/123",
-  "title": "Short PR title (imperative mood, under 72 chars)",
-  "reasoning": "Your analysis of the root cause and why this fix is correct"
-}
-`)
-	sb.WriteString("```\n\n")
-
-	sb.WriteString(`If this is NOT a code bug but you created an issue:
-
-`)
 	sb.WriteString("```json\n")
 	sb.WriteString(`{
   "is_code_bug": false,
-  "issue_url": "https://github.com/owner/repo/issues/456",
+  "issue_url": "",
   "title": "",
-  "reasoning": "Explanation of why this is not a code bug and what action is needed"
+  "reasoning": "Explanation of why this is not a code bug"
 }
 `)
 	sb.WriteString("```\n\n")
 
-	sb.WriteString(`If this is a purely operational issue (no issue needed):
-
-`)
-	sb.WriteString("```json\n")
-	sb.WriteString(`{
-  "is_code_bug": false,
-  "title": "",
-  "reasoning": "Explanation of why this is an operational issue"
-}
-`)
-	sb.WriteString("```\n\n")
-
-	sb.WriteString("You MUST always write RESULT.json before finishing.")
+	sb.WriteString("You MUST write either clio-plan.md (code bug) or RESULT.json (not a code bug) before finishing.")
 
 	return sb.String()
 }
 
-// SystemPrompt returns the --append-system-prompt content for the Claude Code agent.
-func SystemPrompt() string {
-	return `You are Clio, an automated error-fixing agent for Kubernetes applications.
+// InvestigationSystemPrompt returns the system prompt for the investigation step.
+func InvestigationSystemPrompt() string {
+	return `You are Clio, an automated error-investigating agent for Kubernetes applications. Investigation mode only.
 
 Rules:
-- Make minimal changes — fix only the bug, do not refactor or improve unrelated code.
-- Always verify your fix compiles with "go build ./..." before finishing.
-- Always run "go test ./..." and ensure tests pass.
-- If tests fail after your fix, iterate until they pass.
-- Always write RESULT.json in the repository root before finishing.
-- If you cannot determine the root cause or produce a confident fix, set is_code_bug to false and explain in reasoning.
-- When creating PRs, include relevant Kubernetes context (pod name, namespace, error logs) in the PR body.
-- When creating issues, include enough context for a human to diagnose and resolve the problem.
+- Do NOT modify source code — investigation only.
+- If it's a code bug, write clio-plan.md with root cause and fix steps. Do NOT write RESULT.json.
+- If it's operational, write RESULT.json. Do NOT write clio-plan.md.
 - Do NOT create GitHub issues for purely operational problems (OOM kills, DNS failures, image pull errors).
-- Use "git push origin <branch>" to push — the remote is already authenticated.
-- Use "gh pr create" and "gh issue create" for GitHub operations — the CLI is already authenticated.`
+- Use "gh issue create" for GitHub operations — the CLI is already authenticated.`
+}
+
+// BuildPRBody constructs a PR body with K8s context and plan reasoning.
+func BuildPRBody(event clio.ErrorEvent, planContent string) string {
+	var sb strings.Builder
+
+	sb.WriteString("## Kubernetes Context\n\n")
+	writeErrorContext(&sb, event)
+
+	sb.WriteString("## Plan\n\n")
+	sb.WriteString(planContent)
+	sb.WriteString("\n\n---\n*Automated fix by Clio*\n")
+
+	return sb.String()
 }
