@@ -15,11 +15,11 @@ func setEnv(t *testing.T, envs map[string]string) {
 
 func validEnv() map[string]string {
 	return map[string]string{
-		"CLIO_REPO":        "owner/repo",
-		"CLIO_RELEASE":     "myapp",
+		"CLIO_REPO":         "owner/repo",
+		"CLIO_RELEASE":      "myapp",
 		"ANTHROPIC_API_KEY": "sk-test",
-		"GITHUB_TOKEN":     "ghp-test",
-		"CLIO_NAMESPACE":   "staging",
+		"GITHUB_TOKEN":      "ghp-test",
+		"CLIO_NAMESPACE":    "staging",
 	}
 }
 
@@ -38,9 +38,6 @@ func TestLoadConfig_Valid(t *testing.T) {
 	}
 	if cfg.Target != "" {
 		t.Errorf("Target = %q, want empty", cfg.Target)
-	}
-	if cfg.Model != "claude-sonnet-4-20250514" {
-		t.Errorf("Model = %q, want default", cfg.Model)
 	}
 	if cfg.Cooldown != time.Hour {
 		t.Errorf("Cooldown = %v, want 1h", cfg.Cooldown)
@@ -62,6 +59,12 @@ func TestLoadConfig_Valid(t *testing.T) {
 	}
 	if cfg.Port != 8080 {
 		t.Errorf("Port = %d, want 8080", cfg.Port)
+	}
+	if cfg.MaxAgentTurns != 25 {
+		t.Errorf("MaxAgentTurns = %d, want 25", cfg.MaxAgentTurns)
+	}
+	if cfg.MaxAgentBudget != "1.00" {
+		t.Errorf("MaxAgentBudget = %q, want %q", cfg.MaxAgentBudget, "1.00")
 	}
 }
 
@@ -97,7 +100,6 @@ func TestLoadConfig_MissingRequired(t *testing.T) {
 func TestLoadConfig_CustomValues(t *testing.T) {
 	env := validEnv()
 	env["CLIO_TARGET"] = "myapp-web"
-	env["CLIO_MODEL"] = "claude-opus-4-20250514"
 	env["CLIO_COOLDOWN"] = "30m"
 	env["CLIO_MAX_CONCURRENCY"] = "10"
 	env["CLIO_TAIL_LINES"] = "500"
@@ -105,6 +107,8 @@ func TestLoadConfig_CustomValues(t *testing.T) {
 	env["CLIO_BATCH_WINDOW"] = "10s"
 	env["CLIO_DRY_RUN"] = "true"
 	env["CLIO_PORT"] = "9090"
+	env["CLIO_MAX_AGENT_TURNS"] = "50"
+	env["CLIO_MAX_AGENT_BUDGET"] = "5.00"
 	setEnv(t, env)
 
 	cfg, err := LoadConfig()
@@ -113,9 +117,6 @@ func TestLoadConfig_CustomValues(t *testing.T) {
 	}
 	if cfg.Target != "myapp-web" {
 		t.Errorf("Target = %q, want %q", cfg.Target, "myapp-web")
-	}
-	if cfg.Model != "claude-opus-4-20250514" {
-		t.Errorf("Model = %q", cfg.Model)
 	}
 	if cfg.Cooldown != 30*time.Minute {
 		t.Errorf("Cooldown = %v", cfg.Cooldown)
@@ -137,5 +138,11 @@ func TestLoadConfig_CustomValues(t *testing.T) {
 	}
 	if cfg.Port != 9090 {
 		t.Errorf("Port = %d", cfg.Port)
+	}
+	if cfg.MaxAgentTurns != 50 {
+		t.Errorf("MaxAgentTurns = %d, want 50", cfg.MaxAgentTurns)
+	}
+	if cfg.MaxAgentBudget != "5.00" {
+		t.Errorf("MaxAgentBudget = %q, want %q", cfg.MaxAgentBudget, "5.00")
 	}
 }

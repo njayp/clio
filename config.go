@@ -12,10 +12,8 @@ type Config struct {
 	Repo           string
 	Release        string
 	Target         string // optional: narrow to specific app.kubernetes.io/name
-	AnthropicKey   string
 	GitHubToken    string
 	Namespace      string
-	Model          string
 	Cooldown       time.Duration
 	MaxConcurrency int
 	TailLines      int64
@@ -23,18 +21,19 @@ type Config struct {
 	BatchWindow    time.Duration
 	DryRun         bool
 	Port           int
+	MaxAgentTurns  int    // max Claude Code agent turns per session
+	MaxAgentBudget string // max dollar cost per agent session
 }
 
 // LoadConfig reads configuration from environment variables.
 func LoadConfig() (Config, error) {
 	c := Config{
-		Repo:         os.Getenv("CLIO_REPO"),
-		Release:      os.Getenv("CLIO_RELEASE"),
-		Target:       os.Getenv("CLIO_TARGET"),
-		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY"),
-		GitHubToken:  os.Getenv("GITHUB_TOKEN"),
-		Namespace:    os.Getenv("CLIO_NAMESPACE"),
-		Model:        envOrDefault("CLIO_MODEL", "claude-sonnet-4-20250514"),
+		Repo:           os.Getenv("CLIO_REPO"),
+		Release:        os.Getenv("CLIO_RELEASE"),
+		Target:         os.Getenv("CLIO_TARGET"),
+		GitHubToken:    os.Getenv("GITHUB_TOKEN"),
+		Namespace:      os.Getenv("CLIO_NAMESPACE"),
+		MaxAgentBudget: envOrDefault("CLIO_MAX_AGENT_BUDGET", "1.00"),
 	}
 
 	if c.Repo == "" {
@@ -43,7 +42,7 @@ func LoadConfig() (Config, error) {
 	if c.Release == "" {
 		return c, fmt.Errorf("CLIO_RELEASE is required")
 	}
-	if c.AnthropicKey == "" {
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
 		return c, fmt.Errorf("ANTHROPIC_API_KEY is required")
 	}
 	if c.GitHubToken == "" {
@@ -84,6 +83,10 @@ func LoadConfig() (Config, error) {
 		return c, err
 	}
 	c.DryRun, err = parseBool("CLIO_DRY_RUN", false)
+	if err != nil {
+		return c, err
+	}
+	c.MaxAgentTurns, err = parseInt("CLIO_MAX_AGENT_TURNS", 25)
 	if err != nil {
 		return c, err
 	}

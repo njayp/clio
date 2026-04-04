@@ -1,5 +1,17 @@
 UPDATE THIS FILE (CLAUDE.md) AND README.md AS NEEDED
 
+## Architecture
+
+Clio watches K8s pods for errors, triages them with heuristics, then spawns a Claude Code agent (`claude -p`) in a git worktree to investigate, fix, build, test, and push. The agent writes a RESULT.json indicating whether the error is a code bug. If it is, Clio opens a GitHub PR.
+
+**Key packages:**
+- `internal/k8s/` — Pod watching, log filtering, K8s context gathering
+- `internal/pipeline/` — Orchestration (dedup, batching, rate limiting, PR flow)
+- `internal/triage/` — Lightweight heuristic triage (OOM, DNS, image pull → operational)
+- `internal/agent/` — Claude Code subprocess management, git worktrees, prompt construction
+- `internal/github/` — GitHub API client (PRs, comments)
+- `internal/server/` — Health/metrics HTTP server
+
 ## Claude-Code Plan Guidelines
 
 **Context:** Explain why this change is needed — the problem, what prompted it, and the intended outcome.

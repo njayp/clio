@@ -23,22 +23,21 @@ const (
 	classOperational = "operational"
 )
 
-// Classifier classifies error events using Claude.
-type Classifier interface {
-	Classify(ctx context.Context, event clio.ErrorEvent) (clio.Classification, error)
+// Triage performs lightweight heuristic classification before invoking the agent.
+type Triage interface {
+	IsOperational(event clio.ErrorEvent) bool
 }
 
-// Fixer generates code fixes using Claude.
-type Fixer interface {
-	GenerateFix(ctx context.Context, event clio.ErrorEvent, class clio.Classification, files map[string]string) (clio.Fix, error)
+// Agent investigates and fixes errors using Claude Code.
+type Agent interface {
+	Run(ctx context.Context, event clio.ErrorEvent) (*clio.Fix, error)
 }
 
-// GitHubClient interacts with the GitHub API for file fetching and PR management.
+// GitHubClient interacts with the GitHub API for PR management.
 type GitHubClient interface {
-	FetchFiles(ctx context.Context, repo string, paths []string) (map[string]string, error)
-	CreatePR(ctx context.Context, repo string, fix clio.Fix) (prURL string, err error)
+	CreatePRFromBranch(ctx context.Context, repo string, fix clio.Fix) (prURL string, err error)
 	CommentOnPR(ctx context.Context, repo string, prURL string, body string) error
-	ListOpenClioPRs(ctx context.Context, repo string) ([]string, error) // returns open PR branch names with clio/ prefix
+	ListOpenClioPRs(ctx context.Context, repo string) ([]string, error)
 }
 
 // PodWatcher discovers pods and streams their logs.
@@ -49,13 +48,13 @@ type PodWatcher interface {
 
 // Pipeline orchestrates the full error-to-PR flow.
 type Pipeline struct {
-	watcher    PodWatcher
-	classifier Classifier
-	fixer      Fixer
-	gh         GitHubClient
-	dedup      *Dedup
-	batcher    *Batcher
-	cfg        clio.Config
+	watcher PodWatcher
+	triage  Triage
+	agent   Agent
+	gh      GitHubClient
+	dedup   *Dedup
+	batcher *Batcher
+	cfg     clio.Config
 
 	// Rate limiting
 	mu      sync.Mutex
@@ -63,15 +62,15 @@ type Pipeline struct {
 }
 
 // NewPipeline creates a pipeline with all dependencies wired.
-func NewPipeline(watcher PodWatcher, classifier Classifier, fixer Fixer, gh GitHubClient, cfg clio.Config) *Pipeline {
+func NewPipeline(watcher PodWatcher, triage Triage, agent Agent, gh GitHubClient, cfg clio.Config) *Pipeline {
 	return &Pipeline{
-		watcher:    watcher,
-		classifier: classifier,
-		fixer:      fixer,
-		gh:         gh,
-		dedup:      NewDedup(cfg.Cooldown),
-		batcher:    NewBatcher(cfg.BatchWindow),
-		cfg:        cfg,
+		watcher: watcher,
+		triage:  triage,
+		agent:   agent,
+		gh:      gh,
+		dedup:   NewDedup(cfg.Cooldown),
+		batcher: NewBatcher(cfg.BatchWindow),
+		cfg:     cfg,
 	}
 }
 
@@ -158,18 +157,10 @@ func (p *Pipeline) processEvent(ctx context.Context, event clio.ErrorEvent) {
 		return
 	}
 
-	// Classify
-	class, err := p.classifier.Classify(ctx, event)
-	if err != nil {
-		slog.Error("classification failed", "pod", event.PodName, "error", err)
-		return
-	}
-
-	if class.IsCodeBug {
-		errorsClassified.WithLabelValues(classCodeBug).Inc()
-	} else {
+	// Heuristic triage: skip obvious operational issues before spawning the agent
+	if p.triage.IsOperational(event) {
 		errorsClassified.WithLabelValues(classOperational).Inc()
-		slog.Info("skipping operational issue", "pod", event.PodName, "summary", class.Summary)
+		slog.Info("skipping operational issue (triage)", "pod", event.PodName)
 		return
 	}
 
@@ -180,19 +171,19 @@ func (p *Pipeline) processEvent(ctx context.Context, event clio.ErrorEvent) {
 		return
 	}
 
-	// Fetch relevant files
-	files, err := p.gh.FetchFiles(ctx, event.Repo, class.RelevantFiles)
+	// Spawn agent to investigate and fix
+	fix, err := p.agent.Run(ctx, event)
 	if err != nil {
-		slog.Error("failed to fetch files", "error", err)
+		slog.Error("agent failed", "pod", event.PodName, "error", err)
 		return
 	}
 
-	// Generate fix
-	fix, err := p.fixer.GenerateFix(ctx, event, class, files)
-	if err != nil {
-		slog.Error("fix generation failed", "pod", event.PodName, "error", err)
+	// Agent determined this is not a code bug
+	if fix == nil {
+		errorsClassified.WithLabelValues(classOperational).Inc()
 		return
 	}
+	errorsClassified.WithLabelValues(classCodeBug).Inc()
 
 	// Dry run mode
 	if p.cfg.DryRun {
@@ -201,13 +192,12 @@ func (p *Pipeline) processEvent(ctx context.Context, event clio.ErrorEvent) {
 			"pod", event.PodName,
 			"branch", fix.Branch,
 			"title", fix.Title,
-			"files_changed", len(fix.FileChanges),
 		)
 		return
 	}
 
-	// Create PR
-	prURL, err := p.gh.CreatePR(ctx, event.Repo, fix)
+	// Create PR (branch already pushed by agent)
+	prURL, err := p.gh.CreatePRFromBranch(ctx, event.Repo, *fix)
 	if err != nil {
 		slog.Error("failed to create PR", "pod", event.PodName, "error", err)
 		return
@@ -215,7 +205,7 @@ func (p *Pipeline) processEvent(ctx context.Context, event clio.ErrorEvent) {
 	prsOpened.Inc()
 
 	// Comment on PR with context
-	comment := formatPRComment(event, class, fix)
+	comment := formatPRComment(event, *fix)
 	if err := p.gh.CommentOnPR(ctx, event.Repo, prURL, comment); err != nil {
 		slog.Error("failed to comment on PR", "url", prURL, "error", err)
 	}
@@ -247,13 +237,11 @@ func (p *Pipeline) allowPR() bool {
 	return true
 }
 
-func formatPRComment(event clio.ErrorEvent, class clio.Classification, fix clio.Fix) string {
+func formatPRComment(event clio.ErrorEvent, fix clio.Fix) string {
 	var sb strings.Builder
 	sb.WriteString("## Clio Auto-Fix Context\n\n")
 
-	sb.WriteString(fmt.Sprintf("**Confidence:** %.0f%%\n\n", class.Confidence*100))
-
-	sb.WriteString("### Classification Reasoning\n")
+	sb.WriteString("### Reasoning\n")
 	sb.WriteString(fix.Reasoning)
 	sb.WriteString("\n\n")
 

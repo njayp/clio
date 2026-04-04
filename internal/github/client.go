@@ -35,92 +35,14 @@ func (g *Client) defaultBranch(ctx context.Context, owner, name string) (string,
 	return repo.GetDefaultBranch(), nil
 }
 
-// FetchFiles retrieves file contents from GitHub via the Contents API.
-func (g *Client) FetchFiles(ctx context.Context, repo string, paths []string) (map[string]string, error) {
-	owner, name := splitRepo(repo)
-	defBranch, err := g.defaultBranch(ctx, owner, name)
-	if err != nil {
-		return nil, err
-	}
-
-	files := make(map[string]string, len(paths))
-	for _, path := range paths {
-		content, _, _, err := g.client.Repositories.GetContents(ctx, owner, name, path, &gh.RepositoryContentGetOptions{Ref: defBranch})
-		if err != nil {
-			slog.Warn("failed to fetch file", "path", path, "error", err)
-			continue
-		}
-		if content == nil {
-			continue
-		}
-		text, err := content.GetContent()
-		if err != nil {
-			slog.Warn("failed to decode file", "path", path, "error", err)
-			continue
-		}
-		files[path] = text
-	}
-	return files, nil
-}
-
-// CreatePR creates a branch with the fix changes and opens a pull request.
-func (g *Client) CreatePR(ctx context.Context, repo string, fix clio.Fix) (string, error) {
+// CreatePRFromBranch creates a pull request for a branch that has already been pushed.
+func (g *Client) CreatePRFromBranch(ctx context.Context, repo string, fix clio.Fix) (string, error) {
 	owner, name := splitRepo(repo)
 	defBranch, err := g.defaultBranch(ctx, owner, name)
 	if err != nil {
 		return "", err
 	}
 
-	// Get the SHA of the default branch head
-	baseRef, _, err := g.client.Git.GetRef(ctx, owner, name, "refs/heads/"+defBranch)
-	if err != nil {
-		return "", fmt.Errorf("get base ref: %w", err)
-	}
-	baseSHA := baseRef.Object.GetSHA()
-
-	// Get the base tree
-	baseCommit, _, err := g.client.Git.GetCommit(ctx, owner, name, baseSHA)
-	if err != nil {
-		return "", fmt.Errorf("get base commit: %w", err)
-	}
-	baseTreeSHA := baseCommit.Tree.GetSHA()
-
-	// Create tree entries for changed files
-	var entries []*gh.TreeEntry
-	for path, content := range fix.FileChanges {
-		entries = append(entries, &gh.TreeEntry{
-			Path:    gh.Ptr(path),
-			Mode:    gh.Ptr("100644"),
-			Type:    gh.Ptr("blob"),
-			Content: gh.Ptr(content),
-		})
-	}
-
-	tree, _, err := g.client.Git.CreateTree(ctx, owner, name, baseTreeSHA, entries)
-	if err != nil {
-		return "", fmt.Errorf("create tree: %w", err)
-	}
-
-	// Create commit
-	commit, _, err := g.client.Git.CreateCommit(ctx, owner, name, &gh.Commit{
-		Message: gh.Ptr(fix.Title),
-		Tree:    tree,
-		Parents: []*gh.Commit{{SHA: gh.Ptr(baseSHA)}},
-	}, nil)
-	if err != nil {
-		return "", fmt.Errorf("create commit: %w", err)
-	}
-
-	// Create branch ref
-	_, _, err = g.client.Git.CreateRef(ctx, owner, name, &gh.Reference{
-		Ref:    gh.Ptr("refs/heads/" + fix.Branch),
-		Object: &gh.GitObject{SHA: commit.SHA},
-	})
-	if err != nil {
-		return "", fmt.Errorf("create branch: %w", err)
-	}
-
-	// Create PR
 	pr, _, err := g.client.PullRequests.Create(ctx, owner, name, &gh.NewPullRequest{
 		Title: gh.Ptr(fix.Title),
 		Body:  gh.Ptr(fix.Body),

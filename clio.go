@@ -33,22 +33,22 @@ type K8sContext struct {
 	ConfigMaps   []string
 }
 
-// Classification is Claude's assessment of an error event.
-type Classification struct {
-	IsCodeBug     bool
-	Summary       string
-	Confidence    float64 // 0-1
-	RelevantFiles []string
+// AgentResult is the JSON output the Claude Code agent writes to RESULT.json.
+type AgentResult struct {
+	IsCodeBug bool   `json:"is_code_bug"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	Reasoning string `json:"reasoning"`
 }
 
 // Fix is a proposed code change to address an error.
 type Fix struct {
-	Branch      string
-	Title       string
-	Body        string
-	FileChanges map[string]string // filepath → new content
-	RawLogs     string
-	Reasoning   string
+	Branch    string
+	Title     string
+	Body      string
+	DiffPatch string // unified diff from worktree
+	RawLogs   string
+	Reasoning string
 }
 
 // Fingerprint generates a stable hash for an error event.

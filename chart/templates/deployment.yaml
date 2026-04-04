@@ -29,8 +29,6 @@ spec:
               value: {{ .Release.Name | quote }}
             - name: CLIO_TARGET
               value: {{ .Values.target | quote }}
-            - name: CLIO_MODEL
-              value: {{ .Values.model | quote }}
             - name: CLIO_COOLDOWN
               value: {{ .Values.cooldown | quote }}
             - name: CLIO_MAX_CONCURRENCY
@@ -41,6 +39,10 @@ spec:
               value: {{ .Values.maxPRsPerHour | quote }}
             - name: CLIO_BATCH_WINDOW
               value: {{ .Values.batchWindow | quote }}
+            - name: CLIO_MAX_AGENT_TURNS
+              value: {{ .Values.maxAgentTurns | quote }}
+            - name: CLIO_MAX_AGENT_BUDGET
+              value: {{ .Values.maxAgentBudget | quote }}
             - name: CLIO_DRY_RUN
               value: {{ .Values.dryRun | quote }}
             - name: CLIO_PORT
@@ -55,6 +57,9 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secretName }}
                   key: GITHUB_TOKEN
+          volumeMounts:
+            - name: workspace
+              mountPath: /tmp/clio-workspaces
           livenessProbe:
             httpGet:
               path: /healthz
@@ -69,3 +74,7 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: 2Gi

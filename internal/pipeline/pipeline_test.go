@@ -28,29 +28,31 @@ func (m *mockWatcher) GatherContext(_ context.Context, event *clio.ErrorEvent) e
 	return nil
 }
 
-type mockClassifier struct {
-	result clio.Classification
-	err    error
+type mockTriage struct {
+	operational bool
 }
 
-func (m *mockClassifier) Classify(_ context.Context, _ clio.ErrorEvent) (clio.Classification, error) {
-	return m.result, m.err
+func (m *mockTriage) IsOperational(_ clio.ErrorEvent) bool {
+	return m.operational
 }
 
-type mockFixer struct {
-	result clio.Fix
-	err    error
+type mockAgent struct {
+	fix *clio.Fix
+	err error
 }
 
-func (m *mockFixer) GenerateFix(_ context.Context, event clio.ErrorEvent, class clio.Classification, _ map[string]string) (clio.Fix, error) {
+func (m *mockAgent) Run(_ context.Context, event clio.ErrorEvent) (*clio.Fix, error) {
 	if m.err != nil {
-		return clio.Fix{}, m.err
+		return nil, m.err
 	}
-	fix := m.result
+	if m.fix == nil {
+		return nil, nil
+	}
+	fix := *m.fix
 	if fix.Branch == "" {
-		fix.Branch = clio.BranchName(clio.Fingerprint(event), class.Summary)
+		fix.Branch = clio.BranchName(clio.Fingerprint(event), fix.Title)
 	}
-	return fix, nil
+	return &fix, nil
 }
 
 type mockGitHub struct {
@@ -58,17 +60,9 @@ type mockGitHub struct {
 	prsCreated   []clio.Fix
 	comments     []string
 	openBranches []string
-	files        map[string]string
 }
 
-func (m *mockGitHub) FetchFiles(_ context.Context, _ string, _ []string) (map[string]string, error) {
-	if m.files != nil {
-		return m.files, nil
-	}
-	return map[string]string{"main.go": "package main"}, nil
-}
-
-func (m *mockGitHub) CreatePR(_ context.Context, _ string, fix clio.Fix) (string, error) {
+func (m *mockGitHub) CreatePRFromBranch(_ context.Context, _ string, fix clio.Fix) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.prsCreated = append(m.prsCreated, fix)
@@ -92,17 +86,12 @@ func sendEvent(ch chan clio.ErrorEvent, event clio.ErrorEvent) {
 
 func TestPipeline_EndToEnd(t *testing.T) {
 	watcher := &mockWatcher{events: make(chan clio.ErrorEvent, 10)}
-	classifier := &mockClassifier{result: clio.Classification{
-		IsCodeBug:     true,
-		Summary:       "nil pointer in handler",
-		Confidence:    0.9,
-		RelevantFiles: []string{"main.go"},
-	}}
-	fixer := &mockFixer{result: clio.Fix{
-		Title:       "Fix nil pointer",
-		Body:        "Adds nil check",
-		FileChanges: map[string]string{"main.go": "package main\n// fixed"},
-		Reasoning:   "Missing nil check",
+	triage := &mockTriage{operational: false}
+	agent := &mockAgent{fix: &clio.Fix{
+		Title:     "Fix nil pointer",
+		Body:      "Adds nil check",
+		DiffPatch: "--- a/main.go\n+++ b/main.go\n",
+		Reasoning: "Missing nil check",
 	}}
 	gh := &mockGitHub{}
 
@@ -114,7 +103,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 		MaxPRsPerHour:  5,
 	}
 
-	p := NewPipeline(watcher, classifier, fixer, gh, cfg)
+	p := NewPipeline(watcher, triage, agent, gh, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go p.Run(ctx)
@@ -143,8 +132,8 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	if len(gh.comments) != 1 {
 		t.Fatalf("expected 1 comment, got %d", len(gh.comments))
 	}
-	if !strings.Contains(gh.comments[0], "Confidence") {
-		t.Error("comment should contain confidence")
+	if !strings.Contains(gh.comments[0], "Reasoning") {
+		t.Error("comment should contain Reasoning")
 	}
 }
 
@@ -158,8 +147,8 @@ func TestPipeline_SkipsExistingPR(t *testing.T) {
 	fp := clio.Fingerprint(event)[:8]
 
 	watcher := &mockWatcher{events: make(chan clio.ErrorEvent, 10)}
-	classifier := &mockClassifier{result: clio.Classification{IsCodeBug: true, Summary: "bug"}}
-	fixer := &mockFixer{result: clio.Fix{Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"}}}
+	triage := &mockTriage{operational: false}
+	agent := &mockAgent{fix: &clio.Fix{Title: "Fix"}}
 	gh := &mockGitHub{openBranches: []string{"clio/fix-" + fp}}
 
 	cfg := clio.Config{
@@ -170,7 +159,7 @@ func TestPipeline_SkipsExistingPR(t *testing.T) {
 		MaxPRsPerHour:  5,
 	}
 
-	p := NewPipeline(watcher, classifier, fixer, gh, cfg)
+	p := NewPipeline(watcher, triage, agent, gh, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
 
@@ -187,12 +176,8 @@ func TestPipeline_SkipsExistingPR(t *testing.T) {
 
 func TestPipeline_RateLimiter(t *testing.T) {
 	watcher := &mockWatcher{events: make(chan clio.ErrorEvent, 10)}
-	classifier := &mockClassifier{result: clio.Classification{
-		IsCodeBug: true, Summary: "bug", RelevantFiles: []string{"a.go"},
-	}}
-	fixer := &mockFixer{result: clio.Fix{
-		Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"},
-	}}
+	triage := &mockTriage{operational: false}
+	agent := &mockAgent{fix: &clio.Fix{Title: "Fix"}}
 	gh := &mockGitHub{}
 
 	cfg := clio.Config{
@@ -203,7 +188,7 @@ func TestPipeline_RateLimiter(t *testing.T) {
 		MaxPRsPerHour:  1, // allow only 1 PR
 	}
 
-	p := NewPipeline(watcher, classifier, fixer, gh, cfg)
+	p := NewPipeline(watcher, triage, agent, gh, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
 
@@ -231,12 +216,8 @@ func TestPipeline_RateLimiter(t *testing.T) {
 
 func TestPipeline_DryRunSkipsPR(t *testing.T) {
 	watcher := &mockWatcher{events: make(chan clio.ErrorEvent, 10)}
-	classifier := &mockClassifier{result: clio.Classification{
-		IsCodeBug: true, Summary: "bug", RelevantFiles: []string{"a.go"},
-	}}
-	fixer := &mockFixer{result: clio.Fix{
-		Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"},
-	}}
+	triage := &mockTriage{operational: false}
+	agent := &mockAgent{fix: &clio.Fix{Title: "Fix"}}
 	gh := &mockGitHub{}
 
 	cfg := clio.Config{
@@ -248,7 +229,7 @@ func TestPipeline_DryRunSkipsPR(t *testing.T) {
 		DryRun:         true,
 	}
 
-	p := NewPipeline(watcher, classifier, fixer, gh, cfg)
+	p := NewPipeline(watcher, triage, agent, gh, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
 
@@ -275,8 +256,8 @@ func TestPipeline_SkipsRolledBack(t *testing.T) {
 		events: make(chan clio.ErrorEvent, 10),
 		k8sCtx: &clio.K8sContext{RolledBack: true, DeployName: "myapp"},
 	}
-	classifier := &mockClassifier{result: clio.Classification{IsCodeBug: true, Summary: "bug"}}
-	fixer := &mockFixer{result: clio.Fix{Title: "Fix", FileChanges: map[string]string{"a.go": "fixed"}}}
+	triage := &mockTriage{operational: false}
+	agent := &mockAgent{fix: &clio.Fix{Title: "Fix"}}
 	gh := &mockGitHub{}
 
 	cfg := clio.Config{
@@ -287,7 +268,7 @@ func TestPipeline_SkipsRolledBack(t *testing.T) {
 		MaxPRsPerHour:  5,
 	}
 
-	p := NewPipeline(watcher, classifier, fixer, gh, cfg)
+	p := NewPipeline(watcher, triage, agent, gh, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
 

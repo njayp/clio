@@ -8,14 +8,13 @@ import (
 	"syscall"
 
 	"github.com/njayp/clio"
-	"github.com/njayp/clio/internal/claude"
+	"github.com/njayp/clio/internal/agent"
 	ghclient "github.com/njayp/clio/internal/github"
 	"github.com/njayp/clio/internal/k8s"
 	"github.com/njayp/clio/internal/pipeline"
 	"github.com/njayp/clio/internal/server"
+	"github.com/njayp/clio/internal/triage"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -47,18 +46,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Anthropic client
-	anthropicClient := anthropic.NewClient(
-		option.WithAPIKey(cfg.AnthropicKey),
-	)
-
 	// Wire dependencies
 	watcher := k8s.NewWatcher(k8sClient, cfg)
-	classifier := claude.NewClassifier(anthropicClient, cfg.Model)
-	fixer := claude.NewFixer(anthropicClient, cfg.Model)
+	triager := triage.NewTriager()
+	ws := agent.NewWorkspace(cfg.Repo, cfg.GitHubToken, "/tmp/clio-workspaces")
+	ag := agent.NewAgent(ws, cfg)
 	gh := ghclient.NewClient(cfg.GitHubToken)
 
-	p := pipeline.NewPipeline(watcher, classifier, fixer, gh, cfg)
+	p := pipeline.NewPipeline(watcher, triager, ag, gh, cfg)
 
 	// HTTP server
 	srv := server.NewServer(cfg.Port)
