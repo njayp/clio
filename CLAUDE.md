@@ -2,13 +2,14 @@ UPDATE THIS FILE (CLAUDE.md) AND README.md AS NEEDED
 
 ## Architecture
 
-Clio watches K8s pods for errors, triages them with heuristics, then runs a 3-step Claude Code workflow in a git worktree:
+Clio watches K8s pods for errors, triages them with heuristics, then runs a 4-step Claude Code workflow in a git worktree:
 
 1. **Investigate** (`claude -p` with `--allowedTools`) — read-only investigation; writes `clio-plan.md` (code bug) or `RESULT.json` (operational)
 2. **Review** (`claude -p "/plan"` with `--dangerously-skip-permissions`) — refines the plan via the plan-reviewer agent (non-fatal if it fails)
 3. **Implement** (`claude -p "/go"` with `--dangerously-skip-permissions`) — implements the plan, runs /simplify, commits
+4. **Ship** (`claude -p` with `--dangerously-skip-permissions`) — pushes the branch, creates a GitHub PR via `gh pr create`, writes `RESULT.json`
 
-After step 3, Go code pushes the branch and creates a GitHub PR via `gh pr create`. The `.claude/` directory (skills, agents) is embedded via `go:embed` and written into each worktree.
+All steps write `RESULT.json` as the final output; Go simply reads it. The `.claude/` directory (skills, agents) is embedded via `go:embed` and written into each worktree.
 
 **Key packages:**
 - `internal/k8s/` — Pod watching, log filtering, K8s context gathering

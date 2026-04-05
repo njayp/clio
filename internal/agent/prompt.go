@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/njayp/clio"
@@ -102,16 +104,56 @@ Rules:
 - Use "gh issue create" for GitHub operations — the CLI is already authenticated.`
 }
 
-// BuildPRBody constructs a PR body with K8s context and plan reasoning.
-func BuildPRBody(event clio.ErrorEvent, planContent string) string {
+// writeContextFile writes K8s error context to clio-context.md in the worktree.
+func writeContextFile(wtDir string, event clio.ErrorEvent) error {
 	var sb strings.Builder
-
-	sb.WriteString("## Kubernetes Context\n\n")
 	writeErrorContext(&sb, event)
+	return os.WriteFile(filepath.Join(wtDir, contextFile), []byte(sb.String()), 0o644)
+}
 
-	sb.WriteString("## Plan\n\n")
-	sb.WriteString(planContent)
-	sb.WriteString("\n\n---\n*Automated fix by Clio*\n")
+// BuildShipPrompt constructs the prompt for the ship step (push + PR + RESULT.json).
+func BuildShipPrompt(branch string) string {
+	return fmt.Sprintf(`You are Clio, an automated error-fixing agent. Your job is to push the branch and create a GitHub PR.
 
-	return sb.String()
+## Instructions
+
+1. Check for new commits:
+   Run: git log HEAD --not origin/HEAD --oneline
+   If there are NO new commits, write RESULT.json (see failure format below) and stop.
+
+2. Push the branch:
+   Run: git push origin %s
+
+3. Create a GitHub PR:
+   - Read clio-context.md and clio-plan.md from the repository root.
+   - Build a PR body with the Kubernetes context and plan.
+   - Get the commit subject: git log -1 --format=%%s
+   - Run: gh pr create --head %s --title "<commit subject>" --body "<PR body>"
+
+4. Write RESULT.json as the VERY LAST step:
+
+`+"```json"+`
+{
+  "is_code_bug": true,
+  "pr_url": "<URL from gh pr create output>",
+  "title": "<commit subject>",
+  "reasoning": "<brief summary of what was fixed>"
+}
+`+"```"+`
+
+## On failure
+
+If any step fails (no commits, push error, PR creation error), write RESULT.json with:
+
+`+"```json"+`
+{
+  "is_code_bug": true,
+  "pr_url": "",
+  "title": "",
+  "reasoning": "<explanation of what failed>"
+}
+`+"```"+`
+
+You MUST write RESULT.json before finishing, regardless of success or failure.
+`, branch, branch)
 }

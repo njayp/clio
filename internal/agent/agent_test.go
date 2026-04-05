@@ -126,7 +126,8 @@ func TestInvestigationSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildPRBody(t *testing.T) {
+func TestWriteContextFile(t *testing.T) {
+	dir := t.TempDir()
 	event := clio.ErrorEvent{
 		PodName:   "app-1",
 		Namespace: "staging",
@@ -139,17 +140,46 @@ func TestBuildPRBody(t *testing.T) {
 		},
 	}
 
-	body := BuildPRBody(event, "Fix the nil pointer in handler.go line 42")
+	if err := writeContextFile(dir, event); err != nil {
+		t.Fatalf("writeContextFile: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, contextFile))
+	if err != nil {
+		t.Fatalf("read context file: %v", err)
+	}
+	content := string(data)
 
 	mustContain := []string{
 		"Pod: app-1",
 		"Namespace: staging",
 		"panic: nil pointer dereference",
-		"Fix the nil pointer in handler.go line 42",
+		"Deployment: myapp",
 	}
 	for _, check := range mustContain {
-		if !strings.Contains(body, check) {
-			t.Errorf("PR body missing %q", check)
+		if !strings.Contains(content, check) {
+			t.Errorf("context file missing %q", check)
+		}
+	}
+}
+
+func TestBuildShipPrompt(t *testing.T) {
+	prompt := BuildShipPrompt("clio/fix-abc12345")
+
+	mustContain := []string{
+		"clio/fix-abc12345",
+		"git push",
+		"gh pr create",
+		"RESULT.json",
+		"clio-context.md",
+		"clio-plan.md",
+		"git log HEAD --not origin/HEAD",
+		"is_code_bug",
+		"pr_url",
+	}
+	for _, check := range mustContain {
+		if !strings.Contains(prompt, check) {
+			t.Errorf("ship prompt missing %q", check)
 		}
 	}
 }

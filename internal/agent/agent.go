@@ -34,18 +34,21 @@ func init() {
 }
 
 const (
-	planFile   = "clio-plan.md"
-	resultFile = "RESULT.json"
+	planFile    = "clio-plan.md"
+	resultFile  = "RESULT.json"
+	contextFile = "clio-context.md"
 
 	// Budget allocation percentages per step.
-	investigationBudgetPct = 25
-	reviewBudgetPct        = 15
-	implementationBudgetPct = 50
+	investigationBudgetPct  = 25
+	reviewBudgetPct         = 15
+	implementationBudgetPct = 40
+	shipBudgetPct           = 10
 
 	// Turn allocation percentages per step.
 	investigationTurnsPct  = 40
 	reviewTurnsPct         = 30
 	implementationTurnsPct = 60
+	shipTurnsPct           = 10
 )
 
 // Agent spawns Claude Code subprocesses to investigate and fix errors.
@@ -128,8 +131,14 @@ func (a *Agent) Run(ctx context.Context, event clio.ErrorEvent) (*clio.AgentResu
 		return nil, err
 	}
 
-	// Plan exists — append plan and result files to .gitignore so /go's commit doesn't include them
-	if err := appendToGitignore(wtDir, planFile, resultFile); err != nil {
+	// Write K8s context for the PR body
+	if err := writeContextFile(wtDir, event); err != nil {
+		agentOutcome.WithLabelValues("error").Inc()
+		return nil, fmt.Errorf("write context file: %w", err)
+	}
+
+	// Plan exists — append plan, result, and context files to .gitignore so /go's commit doesn't include them
+	if err := appendToGitignore(wtDir, planFile, resultFile, contextFile); err != nil {
 		agentOutcome.WithLabelValues("error").Inc()
 		return nil, fmt.Errorf("update .gitignore: %w", err)
 	}
@@ -153,11 +162,16 @@ func (a *Agent) Run(ctx context.Context, event clio.ErrorEvent) (*clio.AgentResu
 		return &clio.AgentResult{IsCodeBug: true, Title: "dry run", Reasoning: "dry run"}, nil
 	}
 
-	// Step 4: Push and create PR
-	result, err = a.pushAndCreatePR(ctx, wtDir, event, branch)
+	// Step 4: Ship (push + PR + RESULT.json)
+	if err := a.runShip(ctx, wtDir, branch); err != nil {
+		agentOutcome.WithLabelValues("error").Inc()
+		return nil, fmt.Errorf("ship: %w", err)
+	}
+
+	result, err = readResult(wtDir)
 	if err != nil {
 		agentOutcome.WithLabelValues("error").Inc()
-		return nil, fmt.Errorf("push and create PR: %w", err)
+		return nil, fmt.Errorf("read result after ship: %w", err)
 	}
 
 	duration := time.Since(start).Seconds()
@@ -237,51 +251,26 @@ func (a *Agent) runImplementation(ctx context.Context, wtDir string) error {
 	return nil
 }
 
-// pushAndCreatePR pushes the branch and creates a GitHub PR.
-func (a *Agent) pushAndCreatePR(ctx context.Context, wtDir string, event clio.ErrorEvent, branch string) (*clio.AgentResult, error) {
-	// Check for new commits
-	commitOutput, err := a.runCmd(ctx, wtDir, "git", "log", "HEAD", "--not", "origin/HEAD", "--oneline")
-	if err != nil || len(strings.TrimSpace(string(commitOutput))) == 0 {
-		return nil, fmt.Errorf("no new commits found on branch %s", branch)
+// runShip executes the ship step (step 4): push, create PR, write RESULT.json.
+func (a *Agent) runShip(ctx context.Context, wtDir, branch string) error {
+	budget := scaleBudget(a.cfg.MaxAgentBudget, shipBudgetPct)
+	turns := a.cfg.MaxAgentTurns * shipTurnsPct / 100
+	if turns < 5 {
+		turns = 5
 	}
 
-	// Push
-	if out, err := a.runCmd(ctx, wtDir, "git", "push", "origin", branch); err != nil {
-		return nil, fmt.Errorf("git push: %w\n%s", err, out)
+	args := []string{
+		"-p", BuildShipPrompt(branch),
+		"--output-format", "json",
+		"--dangerously-skip-permissions",
+		"--max-turns", strconv.Itoa(turns),
+		"--max-cost", budget,
 	}
-
-	// Read plan for PR body
-	planContent, err := os.ReadFile(filepath.Join(wtDir, planFile))
+	output, err := a.runClaude(ctx, wtDir, args)
 	if err != nil {
-		return nil, fmt.Errorf("read plan for PR body: %w", err)
+		return fmt.Errorf("ship failed: %w\noutput: %s", err, output)
 	}
-
-	// Get commit subject for PR title
-	titleOutput, err := a.runCmd(ctx, wtDir, "git", "log", "-1", "--format=%s")
-	if err != nil {
-		return nil, fmt.Errorf("get commit subject: %w", err)
-	}
-	title := strings.TrimSpace(string(titleOutput))
-
-	// Create PR
-	body := BuildPRBody(event, string(planContent))
-	prOutput, err := a.runCmd(ctx, wtDir, "gh", "pr", "create",
-		"--head", branch,
-		"--title", title,
-		"--body", body,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("gh pr create: %w\n%s", err, prOutput)
-	}
-
-	prURL := strings.TrimSpace(string(prOutput))
-
-	return &clio.AgentResult{
-		IsCodeBug: true,
-		PRURL:     prURL,
-		Title:     title,
-		Reasoning: string(planContent),
-	}, nil
+	return nil
 }
 
 // readResult parses RESULT.json from the worktree.
