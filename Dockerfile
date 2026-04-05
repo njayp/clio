@@ -8,6 +8,9 @@ RUN CGO_ENABLED=0 go build -o clio ./cmd/clio
 
 FROM golang:1.26-alpine
 RUN apk add --no-cache git nodejs npm ca-certificates && \
-    npm install -g @anthropic-ai/claude-code
+    npm install -g @anthropic-ai/claude-code && \
+    adduser -D -h /home/clio clio && \
+    mkdir -p /tmp/clio-workspaces && chown clio:clio /tmp/clio-workspaces
 COPY --from=builder /app/clio /usr/local/bin/clio
+USER clio
 ENTRYPOINT ["clio"]

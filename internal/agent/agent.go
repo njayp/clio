@@ -200,7 +200,7 @@ func (a *Agent) runInvestigation(ctx context.Context, wtDir string, event clio.E
 		"--output-format", "json",
 		"--allowedTools", strings.Join(allowedTools, ","),
 		"--max-turns", strconv.Itoa(turns),
-		"--max-cost", budget,
+		"--max-budget-usd", budget,
 		"--append-system-prompt", InvestigationSystemPrompt(),
 	}
 
@@ -221,7 +221,7 @@ func (a *Agent) runPlanReview(ctx context.Context, wtDir string) error {
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 		"--max-turns", strconv.Itoa(turns),
-		"--max-cost", budget,
+		"--max-budget-usd", budget,
 	}
 
 	output, err := a.runClaude(ctx, wtDir, args)
@@ -241,7 +241,7 @@ func (a *Agent) runImplementation(ctx context.Context, wtDir string) error {
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 		"--max-turns", strconv.Itoa(turns),
-		"--max-cost", budget,
+		"--max-budget-usd", budget,
 	}
 
 	output, err := a.runClaude(ctx, wtDir, args)
@@ -264,7 +264,7 @@ func (a *Agent) runShip(ctx context.Context, wtDir, branch string) error {
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 		"--max-turns", strconv.Itoa(turns),
-		"--max-cost", budget,
+		"--max-budget-usd", budget,
 	}
 	output, err := a.runClaude(ctx, wtDir, args)
 	if err != nil {
