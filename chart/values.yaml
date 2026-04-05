@@ -14,7 +14,7 @@ serviceMonitor:
   enabled: false  # set true if prometheus-operator CRDs are installed
 image:
   repository: ghcr.io/njayp/clio
-  tag: latest
+  tag: ""   # defaults to Chart.appVersion; override with --set image.tag=xxx
 resources:
   requests:
     memory: 128Mi
