@@ -7,7 +7,6 @@ tailLines: 100
 maxPRsPerHour: 5
 batchWindow: "5s"
 maxAgentTurns: 25
-maxAgentBudget: "1.00"
 dryRun: false     # set true for initial rollout observation
 port: 8080
 serviceMonitor:

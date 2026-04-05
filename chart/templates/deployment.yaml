@@ -42,8 +42,6 @@ spec:
               value: {{ .Values.batchWindow | quote }}
             - name: CLIO_MAX_AGENT_TURNS
               value: {{ .Values.maxAgentTurns | quote }}
-            - name: CLIO_MAX_AGENT_BUDGET
-              value: {{ .Values.maxAgentBudget | quote }}
             - name: CLIO_DRY_RUN
               value: {{ .Values.dryRun | quote }}
             - name: CLIO_PORT

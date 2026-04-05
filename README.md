@@ -57,7 +57,6 @@ All configuration is via environment variables, set through Helm values:
 | `maxPRsPerHour` | `5` | Rate limit for PR creation |
 | `batchWindow` | `5s` | Window to group multi-line errors |
 | `maxAgentTurns` | `25` | Max Claude Code agent turns per session |
-| `maxAgentBudget` | `"1.00"` | Max dollar cost per agent session |
 | `dryRun` | `false` | Log actions without creating PRs |
 
 ### Dry Run

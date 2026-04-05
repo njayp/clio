@@ -202,25 +202,6 @@ func TestWriteClaudeConfig(t *testing.T) {
 	}
 }
 
-func TestScaleBudget(t *testing.T) {
-	tests := []struct {
-		total string
-		pct   int
-		want  string
-	}{
-		{"2.00", 25, "0.50"},
-		{"2.00", 15, "0.30"},
-		{"2.00", 50, "1.00"},
-		{"invalid", 25, "invalid"},
-	}
-	for _, tt := range tests {
-		got := scaleBudget(tt.total, tt.pct)
-		if got != tt.want {
-			t.Errorf("scaleBudget(%q, %d) = %q, want %q", tt.total, tt.pct, got, tt.want)
-		}
-	}
-}
-
 func TestReadResult(t *testing.T) {
 	dir := t.TempDir()
 

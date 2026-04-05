@@ -21,8 +21,7 @@ type Config struct {
 	BatchWindow    time.Duration
 	DryRun         bool
 	Port           int
-	MaxAgentTurns  int    // max Claude Code agent turns per session
-	MaxAgentBudget string // max dollar cost per agent session
+	MaxAgentTurns int // max Claude Code agent turns per session
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -33,7 +32,6 @@ func LoadConfig() (Config, error) {
 		Target:         os.Getenv("CLIO_TARGET"),
 		GitHubToken:    os.Getenv("GITHUB_TOKEN"),
 		Namespace:      os.Getenv("CLIO_NAMESPACE"),
-		MaxAgentBudget: envOrDefault("CLIO_MAX_AGENT_BUDGET", "2.00"),
 	}
 
 	if c.Repo == "" {

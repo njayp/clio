@@ -63,9 +63,6 @@ func TestLoadConfig_Valid(t *testing.T) {
 	if cfg.MaxAgentTurns != 50 {
 		t.Errorf("MaxAgentTurns = %d, want 50", cfg.MaxAgentTurns)
 	}
-	if cfg.MaxAgentBudget != "2.00" {
-		t.Errorf("MaxAgentBudget = %q, want %q", cfg.MaxAgentBudget, "2.00")
-	}
 }
 
 func TestLoadConfig_MissingRequired(t *testing.T) {
@@ -108,7 +105,6 @@ func TestLoadConfig_CustomValues(t *testing.T) {
 	env["CLIO_DRY_RUN"] = "true"
 	env["CLIO_PORT"] = "9090"
 	env["CLIO_MAX_AGENT_TURNS"] = "50"
-	env["CLIO_MAX_AGENT_BUDGET"] = "5.00"
 	setEnv(t, env)
 
 	cfg, err := LoadConfig()
@@ -141,8 +137,5 @@ func TestLoadConfig_CustomValues(t *testing.T) {
 	}
 	if cfg.MaxAgentTurns != 50 {
 		t.Errorf("MaxAgentTurns = %d, want 50", cfg.MaxAgentTurns)
-	}
-	if cfg.MaxAgentBudget != "5.00" {
-		t.Errorf("MaxAgentBudget = %q, want %q", cfg.MaxAgentBudget, "5.00")
 	}
 }

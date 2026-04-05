@@ -38,12 +38,6 @@ const (
 	resultFile  = "RESULT.json"
 	contextFile = "clio-context.md"
 
-	// Budget allocation percentages per step.
-	investigationBudgetPct  = 25
-	reviewBudgetPct         = 15
-	implementationBudgetPct = 40
-	shipBudgetPct           = 10
-
 	// Turn allocation percentages per step.
 	investigationTurnsPct  = 40
 	reviewTurnsPct         = 30
@@ -192,7 +186,6 @@ func (a *Agent) runInvestigation(ctx context.Context, wtDir string, event clio.E
 		"Write",
 	}
 
-	budget := scaleBudget(a.cfg.MaxAgentBudget, investigationBudgetPct)
 	turns := a.cfg.MaxAgentTurns * investigationTurnsPct / 100
 
 	args := []string{
@@ -200,7 +193,6 @@ func (a *Agent) runInvestigation(ctx context.Context, wtDir string, event clio.E
 		"--output-format", "json",
 		"--allowedTools", strings.Join(allowedTools, ","),
 		"--max-turns", strconv.Itoa(turns),
-		"--max-budget-usd", budget,
 		"--append-system-prompt", InvestigationSystemPrompt(),
 	}
 
@@ -213,7 +205,6 @@ func (a *Agent) runInvestigation(ctx context.Context, wtDir string, event clio.E
 
 // runPlanReview executes the plan review step (step 2).
 func (a *Agent) runPlanReview(ctx context.Context, wtDir string) error {
-	budget := scaleBudget(a.cfg.MaxAgentBudget, reviewBudgetPct)
 	turns := a.cfg.MaxAgentTurns * reviewTurnsPct / 100
 
 	args := []string{
@@ -221,7 +212,6 @@ func (a *Agent) runPlanReview(ctx context.Context, wtDir string) error {
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 		"--max-turns", strconv.Itoa(turns),
-		"--max-budget-usd", budget,
 	}
 
 	output, err := a.runClaude(ctx, wtDir, args)
@@ -233,7 +223,6 @@ func (a *Agent) runPlanReview(ctx context.Context, wtDir string) error {
 
 // runImplementation executes the implementation step (step 3).
 func (a *Agent) runImplementation(ctx context.Context, wtDir string) error {
-	budget := scaleBudget(a.cfg.MaxAgentBudget, implementationBudgetPct)
 	turns := a.cfg.MaxAgentTurns * implementationTurnsPct / 100
 
 	args := []string{
@@ -241,7 +230,6 @@ func (a *Agent) runImplementation(ctx context.Context, wtDir string) error {
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 		"--max-turns", strconv.Itoa(turns),
-		"--max-budget-usd", budget,
 	}
 
 	output, err := a.runClaude(ctx, wtDir, args)
@@ -253,7 +241,6 @@ func (a *Agent) runImplementation(ctx context.Context, wtDir string) error {
 
 // runShip executes the ship step (step 4): push, create PR, write RESULT.json.
 func (a *Agent) runShip(ctx context.Context, wtDir, branch string) error {
-	budget := scaleBudget(a.cfg.MaxAgentBudget, shipBudgetPct)
 	turns := a.cfg.MaxAgentTurns * shipTurnsPct / 100
 	if turns < 5 {
 		turns = 5
@@ -264,7 +251,6 @@ func (a *Agent) runShip(ctx context.Context, wtDir, branch string) error {
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 		"--max-turns", strconv.Itoa(turns),
-		"--max-budget-usd", budget,
 	}
 	output, err := a.runClaude(ctx, wtDir, args)
 	if err != nil {
@@ -320,10 +306,3 @@ func (a *Agent) logResult(result *clio.AgentResult, event clio.ErrorEvent, durat
 	}
 }
 
-func scaleBudget(total string, pct int) string {
-	f, err := strconv.ParseFloat(total, 64)
-	if err != nil {
-		return total
-	}
-	return fmt.Sprintf("%.2f", f*float64(pct)/100)
-}
